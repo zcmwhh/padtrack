@@ -570,6 +570,32 @@ def netease_meta(title, artist):
     return result
 
 
+_now_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": "none"}}
+
+
+def query_now():
+    """只回答「现在放的是哪首、在不在放」，不碰网络，够快。"""
+    now = time.time()
+    if now - _now_cache["t"] < 0.7:
+        return _now_cache["data"]
+
+    data = {"title": "", "artist": "", "status": "none"}
+    try:
+        raw, exe = player_window_title()
+        if raw:
+            t, a = split_song_title(raw)
+            if t:
+                playing = session_active(exe)
+                data = {"title": t, "artist": a,
+                        "status": "Paused" if playing is False else "Playing"}
+    except Exception:
+        pass
+
+    _now_cache["t"] = time.time()
+    _now_cache["data"] = data
+    return data
+
+
 def query_media():
     """当前播放曲目，带 2.5 秒缓存。"""
     if time.time() - _media_cache["t"] < 2.5:
@@ -685,6 +711,14 @@ class Handler(socketserver.BaseRequestHandler):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 body = json.dumps(query_media(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/now":
+                if key != KEY:
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 

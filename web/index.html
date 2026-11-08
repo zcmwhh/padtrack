@@ -38,7 +38,7 @@
   }
   #hint b { color: #8fa3b8; font-weight: 600; }
   #hud {
-    position: fixed; left: 16px; top: calc(14px + env(safe-area-inset-top));
+    position: fixed; left: 16px; top: calc(16px + env(safe-area-inset-top));
     display: flex; align-items: center; gap: 8px;
     padding: 7px 14px; border-radius: 999px;
     background: rgba(22, 30, 40, .72); border: 1px solid rgba(120, 150, 180, .18);
@@ -250,7 +250,7 @@
 
   /* 触摸板模式的九宫格数字键盘：常驻显示，未激活时只是背景（不拦触摸） */
   #numpad {
-    position: fixed; right: 8px; top: 64px; bottom: 64px;
+    position: fixed; right: 16px; top: 70px; bottom: 70px;
     width: min(32vw, 330px); z-index: 20;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -313,7 +313,7 @@
   #hint { transition: opacity .35s ease; }
 
   .topbar {
-    position: fixed; right: 16px; top: calc(14px + env(safe-area-inset-top));
+    position: fixed; right: 16px; top: calc(10px + env(safe-area-inset-top));
     display: flex; gap: 10px;
   }
   .round {
@@ -354,13 +354,14 @@
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 40;                               /* 盖住歌词层和数字键层 */
     transform: translateY(110%);
-    transition: transform .56s var(--ease-spring);
+    transition: transform .56s var(--ease-spring), opacity .36s var(--ease-out);
+    opacity: 0; pointer-events: none;
     background: #0d1319;                       /* 不透明，打字时背景不干扰视线 */
     border-top: 1px solid rgba(120, 150, 180, .2);
     padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
     box-shadow: 0 -18px 40px rgba(0, 0, 0, .45);
   }
-  #kb.open { transform: translateY(0); }
+  #kb.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
   #ta {
     width: 100%; min-height: 54px; max-height: 160px; resize: none;
     background: #0b1016; color: #e6edf3;
@@ -415,12 +416,23 @@
   /* 全屏键盘 + 触控板 */
   #kbfull {
     position: fixed; inset: 0; z-index: 60;
-    display: none; flex-direction: column;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
     background: #0b1016;
     padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
     touch-action: none;
   }
-  #kbfull.open { display: flex; }
+  #kbfull.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
   .kfbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #7d8fa1; }
   .kfbar span { flex: 1; }
   #kfPad { flex: 1; display: flex; flex-direction: column; gap: 8px; }
@@ -461,12 +473,23 @@
   /* 分屏：键盘为主 + 小触控板 */
   #splitmode {
     position: fixed; inset: 0; z-index: 60;
-    display: none; flex-direction: column;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
     background: #0b1016;
     padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
     touch-action: none;
   }
-  #splitmode.open { display: flex; }
+  #splitmode.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
   .spbody { flex: 1; display: flex; gap: 10px; min-height: 0; }
   #spKeys { flex: 3.4 1 0; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
   #spPad {
@@ -487,12 +510,23 @@
   /* 环绕：上方打字区 + 下方 3:2 触控板 + 两侧功能区 */
   #trmode {
     position: fixed; inset: 0; z-index: 60;
-    display: none; flex-direction: column;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
     background: #0b1016;
     padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
     touch-action: none;
   }
-  #trmode.open { display: flex; }
+  #trmode.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
   #trTop { flex: 3 1 0; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
   #trTop .kbrow { flex: 1; gap: 6px; }
   #trTop .kbkey { height: auto; font-size: 17px; border-radius: 11px; }
@@ -781,6 +815,7 @@
     numpad.appendChild(b);
   });
   document.getElementById('numBtn').addEventListener('click', () => {
+    collapsePlayer();
     const on = numpad.classList.toggle('active');
     document.getElementById('numBtn').classList.toggle('on', on);
   });
@@ -798,6 +833,13 @@
   const musicWave = document.getElementById('musicWave');
   const musicProg = document.getElementById('musicProg');
   let islandTimer = 0, songDur = 0, songAnchor = 0;
+
+  // 展开的二级菜单：只要开始干别的就收回去
+  function collapsePlayer() {
+    const el = document.getElementById('island');
+    if (el) el.classList.remove('exp');
+    clearTimeout(islandTimer);
+  }
   const SVG_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4 19 12 8 18.6z" fill="currentColor"/></svg>';
   const SVG_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg>';
 
@@ -815,6 +857,7 @@
   const lyricInner = document.getElementById('lyricInner');
 
   let lastMedia = '';
+  let lyricOffset = parseFloat(localStorage.getItem('padtrackLyricOffset') || '0') || 0;
   let lyricLines = [], lyricBase = 0, lyricClock = 0;
   let lyricPlaying = false, lyricActive = -1, lyricSongKey = '';
 
@@ -847,7 +890,7 @@
     lyricLines = Array.isArray(lines) ? lines : [];
     lyricInner.innerHTML = '';
     lyricActive = -1;
-    lyricBase = pos || 0;
+    lyricBase = (pos || 0) + lyricOffset;
     lyricClock = performance.now();
     lyricLines.forEach((row) => {
       const el = document.createElement('div');
@@ -960,8 +1003,29 @@
   }
   pollMedia();
   setInterval(pollMedia, 3000);
+
+  // 快速探测：每秒问一次「现在放的是哪首」，切歌能立刻发现
+  let nowKey = '';
+  async function pollNow() {
+    try {
+      const r = await fetch(`/now?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const k = (d.title || '') + '|' + (d.status || '');
+      if (k !== nowKey) { nowKey = k; lastMedia = ''; pollMedia(); }
+    } catch (_) {}
+  }
+  setInterval(pollNow, 1000);
   function paintProgress() {
     if (!songDur) { musicProg.style.width = '0%'; return; }
+    const t = lyricTime();
+    // 单曲循环时标题不变，靠时长判断是不是又从头开始了
+    if (t > songDur + 2) {
+      lyricBase = t - songDur;
+      lyricClock = performance.now();
+      songAnchor = lyricClock - lyricBase * 1000;
+      paintLyric(true);
+    }
     const p = Math.max(0, Math.min(1, lyricTime() / songDur));
     musicProg.style.width = (p * 100).toFixed(1) + '%';
   }
@@ -969,17 +1033,21 @@
 
   // 手动微调歌词进度：打开页面时歌已经在播一半，就靠这个对齐
   function nudgeLyric(sec) {
+    lyricOffset = Math.round((lyricOffset + sec) * 10) / 10;
+    localStorage.setItem('padtrackLyricOffset', String(lyricOffset));
     if (!lyricLines.length) { flash('当前没有歌词'); return; }
     lyricBase = Math.max(0, lyricTime() + sec);
     lyricClock = performance.now();
     paintLyric(true);
-    flash(sec > 0 ? '歌词快进 ' + sec + ' 秒' : '歌词后退 ' + (-sec) + ' 秒');
+    const dir = sec > 0 ? '快进' : '后退';
+    flash('歌词' + dir + ' ' + Math.abs(sec) + ' 秒（累计 ' + lyricOffset + '）');
   }
   document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
   document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
 
   pad.addEventListener('pointerdown', (e) => {
     if (!connected) return;
+    collapsePlayer();
     try { pad.setPointerCapture(e.pointerId); } catch (_) {}
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     hint.style.display = 'none';
@@ -1296,7 +1364,10 @@
     send({ t: 'cfg', abs: S.abs });
   });
 
-  document.getElementById('gear').addEventListener('click', () => panel.classList.toggle('open'));
+  document.getElementById('gear').addEventListener('click', () => {
+    collapsePlayer();
+    panel.classList.toggle('open');
+  });
 
   document.getElementById('full').addEventListener('click', () => {
     const el = document.documentElement;
@@ -1419,6 +1490,7 @@
   renderAll();
 
   document.getElementById('kbBtn').addEventListener('click', () => {
+    collapsePlayer();
     kb.classList.toggle('open');
     if (kb.classList.contains('open') && document.activeElement) {
       document.activeElement.blur();     // 不要唤起平板自己的输入法
@@ -1736,6 +1808,7 @@
   const MODE_LABEL = { pad: '触控板', drawer: '抽屉', full: '全屏', split: '分屏', surround: '环绕' };
 
   function showMode(name) {
+    collapsePlayer();
     kb.classList.remove('open');
     kbfull.classList.remove('open');
     splitmode.classList.remove('open');
