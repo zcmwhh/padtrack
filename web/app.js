@@ -68,6 +68,7 @@
   let mode = 'idle';          // idle | pending | move | drag | scroll2 | swipe3
   let sx = 0, sy = 0, st = 0;
   let lastCX = 0, lastCY = 0;
+  let dblX = 0, dblY = 0, dblTimer = 0;   // 第二下的落点和「停稳」计时器
   let lpTimer = 0;
   let accX = 0, accY = 0, remX = 0, remY = 0;
   let wheelX = 0, wheelY = 0, remWX = 0, remWY = 0;
@@ -83,9 +84,11 @@
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
   let lastTapX = 0, lastTapY = 0;      // 上一次点击落点，用来判断是不是真的双击
-  const DBL_SLOP = 12;                 // 两次点击允许的位置偏差（收紧，避免误判成双击）
+  const DBL_SLOP = 8;                  // 两次点击允许的位置偏差
   const DBL_MS = 300;                  // 两次点击的最大间隔（人手双击一般在 250ms 内）
   const DBL_MOVE = 14;                 // 第二下按下后要真的移动这么远才开拖
+  const DBL_STILL = 80;                // 第二下必须先停稳这么久，才允许进入拖拽候选
+  const DBL_WOBBLE = 6;                // 停稳期间允许的手抖幅度，超过就当普通移动
   const HOLD_MS = 420;                 // 按住多久算拖动
 
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
@@ -979,7 +982,13 @@
         // dblstart 会先挪 8px 再按下，破坏双击的位置容差，
         // 所以拖的时候标题栏不会被判成双击最大化；
         // 而不移动直接松开，仍然是正常的第二次单击（双击最大化照常）。
-        mode = 'armed';
+        // 先等手指停稳（DBL_STILL），期间抖了就退回普通移动
+        mode = 'dblwait';
+        dblX = e.clientX; dblY = e.clientY;
+        clearTimeout(dblTimer);
+        dblTimer = setTimeout(() => {
+          if (mode === 'dblwait') mode = 'armed';
+        }, DBL_STILL);
         lastTapEnd = 0;
       } else {
         mode = 'pending';
@@ -1025,6 +1034,12 @@
         mode = 'move';
         clearTimeout(lpTimer);
         lastCX = sx; lastCY = sy;
+      }
+      if (mode === 'dblwait' && Math.hypot(e.clientX - dblX, e.clientY - dblY) > DBL_WOBBLE) {
+        // 第二下还没停稳就滑走了：不是双击拖，按普通移动处理（光标继续跟手）
+        clearTimeout(dblTimer);
+        mode = 'move';
+        lastCX = dblX; lastCY = dblY;
       }
       if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > DBL_MOVE) {
         mode = 'drag';
@@ -1109,8 +1124,9 @@
         if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
           click('l'); lastTapEnd = now; lastTapX = e.clientX; lastTapY = e.clientY;
         }
-      } else if (mode === 'armed') {
+      } else if (mode === 'armed' || mode === 'dblwait') {
         // 第二下没有移动就松开 = 普通的第二次单击，双击（如标题栏最大化）照常
+        clearTimeout(dblTimer);
         click('l');
       } else if (mode === 'drag') {
         releaseLeft();
