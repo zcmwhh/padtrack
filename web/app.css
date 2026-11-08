@@ -368,10 +368,14 @@
 
   /* ---------------- 歌单抽屉 ---------------- */
   #sheetMask {
-    position: fixed; inset: 0; z-index: 80; background: rgba(5, 8, 12, .5);
+    position: fixed; inset: 0; z-index: 80;
+    /* 原来只压暗 50% + 2px 模糊，底下的胶囊、数字键还能认出来，
+       在抽屉圆角旁边特别显眼。压到 80% 再重模糊，看起来就是一层暗背景。 */
+    background: rgba(4, 6, 10, .80);
     opacity: 0; pointer-events: none;
     transition: opacity .35s var(--ease-out);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(14px) saturate(.85);
+    -webkit-backdrop-filter: blur(14px) saturate(.85);
   }
   #sheetMask.on { opacity: 1; pointer-events: auto; }
 
