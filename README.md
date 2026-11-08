@@ -21,7 +21,7 @@ PC 端跑一个纯标准库的 Python 脚本，平板用浏览器连上，手指
 
 ## 下载
 
-到 [Releases](../../releases) 下载 `PadTrack.zip`，解压后双击 `PadTrack.exe`，**不需要安装 Python**。
+到 [Releases](releases/latest) 下载 `PadTrack.zip`，解压后双击 `PadTrack.exe`，**不需要安装 Python**。
 
 从源码运行：
 
