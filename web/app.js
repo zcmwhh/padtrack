@@ -268,11 +268,18 @@
   let uiPaused = false;          // 界面认为当前是否暂停
   let songStartPending = false;  // 这首歌还没真正开始过（用于起步补偿）
   let fastPollUntil = 0;         // 切歌后的一小段高频轮询窗口
+  let songAudibleAt = 0;         // 当前这首曲真正开始出声的时刻（performance.now）
+
+  // 这首曲从出声到现在过了多少秒（歌词晚到时用来补基准）
+  function audibleElapsed(nowMs) {
+    return songAudibleAt ? Math.max(0, (nowMs - songAudibleAt) / 1000) : 0;
+  }
 
   // 歌词时钟只跟「真的有没有声音」走：没声音（加载/暂停/卡顿）就冻住
   function applyAudible(audible, nowMs) {
     if (audible === null) return;
     if (performance.now() < iconLockUntil) return;   // 刚点过按钮，以用户操作为准
+    if (audible && !songAudibleAt && !uiPaused) songAudibleAt = nowMs;
     if (!audible && lyricPlaying) {
       lyricBase = lyricTime();
       lyricPlaying = false;
@@ -476,12 +483,12 @@
       const paused = d.status === 'Paused';
 
       if (songKey !== lyricSongKey) {
-        // 新歌一律从 0 开始，真正开始走是「听到声音」那一刻。
-        // 以前用「发现切歌到现在过了多久」估算，赶上加载慢的歌，
-        // 加载的几秒会被算进歌词，一开头就领先好几秒。
-        const base = typeof d.pos === 'number' ? d.pos : 0;
+        // 基准 = 这首歌真正已经播了多久：
+        // 播放器给得出位置就用它，否则用「从听到声音到现在」（不含加载耗时）
+        const base = typeof d.pos === 'number' ? d.pos : audibleElapsed(nowMs);
         lyricSongKey = songKey;
         lyricPlaying = false;          // 先冻住，等 audible
+        songAudibleAt = 0;             // 新歌，等它真正出声再记
         songStartPending = true;
         fastPollUntil = nowMs + 6000;  // 接下来 6 秒高频问一次，尽快发现出声
         setLyrics(d.lyric, base);
@@ -495,7 +502,8 @@
         }
         // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
         if (!lyricLines.length && d.lyric && d.lyric.length) {
-          setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
+          // 歌词比声音晚到：把这段时间补进基准，否则会一直落后
+          setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : audibleElapsed(nowMs));
           anchorAt(nowMs);
         }
       }
