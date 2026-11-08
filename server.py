@@ -572,12 +572,12 @@ def netease_meta(title, artist):
 
 def query_media():
     """当前播放曲目，带 2.5 秒缓存。"""
-    if time.time() - _media_cache["t"] < 4.0:
+    if time.time() - _media_cache["t"] < 2.5:
         return _media_cache["data"]
 
     data = {"title": "", "artist": "", "status": ""}
     with _media_lock:
-        if time.time() - _media_cache["t"] < 4.0:
+        if time.time() - _media_cache["t"] < 2.5:
             return _media_cache["data"]
 
         # 1) 先看本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放

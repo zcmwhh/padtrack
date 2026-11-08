@@ -204,6 +204,45 @@
                 border-color .2s ease, color .2s ease;
   }
 
+
+  /* ---------------- 统一的浮层视觉 ---------------- */
+  #hud, .topbar .round, #numpad, #panel, #tip, #island {
+    background: rgba(14, 19, 26, .88);
+    border: 1px solid rgba(120, 150, 180, .14);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .04);
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+  #numpad { background: rgba(14, 19, 26, .55); }
+  #numpad.active { background: rgba(14, 19, 26, .92); }
+  #numpad button {
+    background: rgba(30, 41, 54, .85);
+    border: 1px solid rgba(120, 150, 180, .13);
+    color: #b3c2d1;
+    transition: transform .16s var(--ease-spring), background .16s ease;
+  }
+  #numpad button:active { transform: scale(.94); background: rgba(52, 70, 90, .95); }
+
+  /* SVG 图标统一尺寸 */
+  #island svg { width: 19px; height: 19px; display: block; }
+  .isle-play svg { width: 15px; height: 15px; }
+  .round svg { width: 20px; height: 20px; display: block; }
+  .round { padding: 0; display: grid; place-items: center; }
+
+  /* 紧凑态：封面 + 歌名 + 律动 + 播放键 */
+  #island { width: 244px; }
+  .isle-meta.compact { flex-direction: row; align-items: center; gap: 0; }
+  .isle-meta.compact #musicTitle {
+    font-size: 12.5px; font-weight: 500; color: #cfdcea; letter-spacing: .1px;
+  }
+  .isle-meta.compact { padding-right: 2px; }
+  #musicTitleFull {
+    font-size: 13px; color: #e6edf3; font-weight: 600; letter-spacing: .2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* 收起态的律动条稍微往里挪，和整体留白一致 */
+  .isle-wave { margin-right: 2px; }
+
   /* 尊重系统的「减少动态效果」 */
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -493,20 +532,23 @@
 <div id="island" class="hidden">
   <div class="isle-compact">
     <img class="isle-cover" id="musicCover" alt="" />
+    <div class="isle-meta compact">
+      <div id="musicTitle">—</div>
+    </div>
     <div class="isle-wave" id="musicWave"><i></i><i></i><i></i></div>
-    <button class="isle-play" data-media="179" title="播放/暂停">⏯</button>
+    <button class="isle-play" data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
   </div>
   <div class="isle-full">
     <img class="isle-cover big" id="musicCoverBig" alt="" />
     <div class="isle-meta">
-      <div id="musicTitle">—</div>
+      <div id="musicTitleFull">—</div>
       <div id="musicArtist"></div>
       <div class="isle-bar"><i id="musicProg"></i></div>
     </div>
     <div class="isle-ctrl">
-      <button data-media="177" title="上一首">⏮</button>
-      <button data-media="179" title="播放/暂停">⏯</button>
-      <button data-media="176" title="下一首">⏭</button>
+      <button data-media="177" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6.2 9.4 12 19 17.8z" fill="currentColor"/></svg></button>
+      <button data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
+      <button data-media="176" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 6.2 14.6 12 5 17.8z" fill="currentColor"/></svg></button>
     </div>
   </div>
 </div>
@@ -515,9 +557,9 @@
 <div id="lyrics"><div id="lyricInner"></div></div>
 
 <div class="topbar">
-  <button class="round" id="numBtn" title="数字键盘">▦</button>
-  <button class="round" id="kbBtn" title="键盘">⌨</button>
-  <button class="round" id="gear" title="设置">⚙</button>
+  <button class="round" id="numBtn" title="数字键盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.6" y="3.2" width="16.8" height="17.6" rx="3.4"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M9 16h6"/></svg></button>
+  <button class="round" id="kbBtn" title="键盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.4" y="6" width="19.2" height="12" rx="3"/><path d="M6.2 9.6h.01M9.4 9.6h.01M12.6 9.6h.01M15.8 9.6h.01M18.4 9.6h.01M7.4 14.4h9.2"/></svg></button>
+  <button class="round" id="gear" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h8M16.4 7H20M4 12h2.6M10.4 12H20M4 17h9M17.4 17H20"/><circle cx="14.2" cy="7" r="2.2"/><circle cx="8.4" cy="12" r="2.2"/><circle cx="15.4" cy="17" r="2.2"/></svg></button>
 </div>
 
 <div id="panel">
@@ -704,7 +746,7 @@
   }
 
   /* ---------------- 顶部媒体控制（所有模式可见） ---------------- */
-  document.querySelectorAll('#musicbar button').forEach((b) => {
+  document.querySelectorAll('#island button').forEach((b) => {
     b.addEventListener('click', () => {
       send({ t: 'k', vk: parseInt(b.dataset.media, 10) });   // 系统媒体键
       b.classList.add('on');
@@ -755,7 +797,9 @@
   const musicCoverBig = document.getElementById('musicCoverBig');
   const musicWave = document.getElementById('musicWave');
   const musicProg = document.getElementById('musicProg');
-  let islandTimer = 0, songDur = 0;
+  let islandTimer = 0, songDur = 0, songAnchor = 0;
+  const SVG_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4 19 12 8 18.6z" fill="currentColor"/></svg>';
+  const SVG_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg>';
 
   // 点胶囊展开成详情，6 秒无操作自动收回（和灵动岛一个思路）
   function expandIsland(on) {
@@ -851,6 +895,8 @@
       island.classList.add('on');
       musicTitle.textContent = d.title;
       musicTitle.title = d.title;
+      const titleFull = document.getElementById('musicTitleFull');
+      if (titleFull) { titleFull.textContent = d.title; titleFull.title = d.title; }
       musicArtist.textContent = d.artist || '';
       songDur = typeof d.dur === 'number' ? d.dur : 0;
       const coverUrl = d.cover
@@ -866,32 +912,54 @@
 
       const songKey = `${d.title}|${d.artist}`;
       const paused = d.status === 'Paused';
+      const nowMs = performance.now();
+      const prevDur = songDur;
+      const prevAnchor = songAnchor;
+
+      songDur = typeof d.dur === 'number' ? d.dur : 0;
 
       if (songKey !== lyricSongKey) {
+        // 起始点：播放器给了真实进度就用它；否则用「上一首的结束时间」推算。
+        // 顺序播放时上一首放完正好接下一首，这样切歌瞬间就能对上。
+        let base = typeof d.pos === 'number' ? d.pos : 0;
+        if (typeof d.pos !== 'number' && prevDur > 0 && prevAnchor > 0) {
+          const predictedEnd = prevAnchor + prevDur * 1000;
+          const late = nowMs - predictedEnd;
+          if (late > -3000 && late < 25000) base = Math.max(0, late / 1000);
+        }
         lyricSongKey = songKey;
         lyricPlaying = !paused;
-        setLyrics(d.lyric, d.pos);
-      } else if (typeof d.pos === 'number') {
-        // 播放器支持进度回传时，用它纠正漂移
-        lyricBase = d.pos;
-        lyricClock = performance.now();
+        setLyrics(d.lyric, base);
+        songAnchor = nowMs - base * 1000;
+      } else {
+        if (typeof d.pos === 'number') {
+          // 播放器支持进度回传时，每次都以它为准，彻底不漂
+          lyricBase = d.pos;
+          lyricClock = nowMs;
+          songAnchor = nowMs - d.pos * 1000;
+        }
+        // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
+        if (!lyricLines.length && d.lyric && d.lyric.length) {
+          setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
+          songAnchor = nowMs - lyricBase * 1000;
+        }
       }
 
       if (paused && lyricPlaying) {
         lyricBase = lyricTime();
         lyricPlaying = false;
+        songAnchor = lyricClock - lyricBase * 1000;
       } else if (!paused && !lyricPlaying) {
-        lyricClock = performance.now();
+        lyricClock = nowMs;
         lyricPlaying = true;
       }
       musicWave.classList.toggle('playing', !paused);
-      document.querySelectorAll('#island [data-media="179"]').forEach((b) => {
-        b.textContent = paused ? '▶' : '⏸';
-      });
+      const ico = paused ? SVG_PLAY : SVG_PAUSE;
+      document.querySelectorAll('#island [data-media="179"]').forEach((b) => { b.innerHTML = ico; });
     } catch (_) {}
   }
   pollMedia();
-  setInterval(pollMedia, 5000);
+  setInterval(pollMedia, 3000);
   function paintProgress() {
     if (!songDur) { musicProg.style.width = '0%'; return; }
     const p = Math.max(0, Math.min(1, lyricTime() / songDur));
