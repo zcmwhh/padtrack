@@ -264,7 +264,11 @@ def handle_message(msg):
     elif t == "dblstart":
         act_drag_start()
     elif t == "k":
-        act_tap(int(msg.get("vk") or 0))
+        vk = int(msg.get("vk") or 0)
+        if vk == 0xB3:                      # 播放/暂停键：记下来，别让换歌宽限期掩盖它
+            global _user_pause_at
+            _user_pause_at = time.time()
+        act_tap(vk)
     elif t == "ks":
         act_combo(msg.get("mods", []), int(msg.get("vk") or 0))
     elif t == "txt":
@@ -529,6 +533,35 @@ def _ensure_com():
 
 
 _peak_seen = {}            # exe -> 最后一次电平非零的时间
+_track = {"key": "", "at": 0.0}   # 当前歌曲 + 第一次看到它的时间
+_TRACK_GRACE = 5.0        # 换歌后这段时间内，没声音也不判暂停（正在加载下一首）
+_user_pause_at = 0.0      # 用户最后一次按播放/暂停键的时间
+
+
+def _note_track(title, artist):
+    """记录当前歌曲；返回它是「刚换的」还是老歌。"""
+    key = f"{title}|{artist}"
+    now = time.time()
+    prev = _track["key"]
+    changed = bool(prev) and key != prev
+    if key != prev:
+        _track["key"] = key
+        _track["at"] = now
+    return changed
+
+
+def _just_switched():
+    """当前是不是「刚换歌、还在加载」。
+
+    用户主动按了播放/暂停键之后的 3 秒内不算——否则他按下暂停，
+    我们会因为宽限期继续报「正在播放」，界面就不跟着变。
+    """
+    if not _track["at"]:
+        return False
+    now = time.time()
+    if now - _user_pause_at < 3.0:
+        return False
+    return (now - _track["at"]) < _TRACK_GRACE
 _PEAK_SILENCE = 0.45        # 电平连续为 0 多久算暂停（躲开换气、间奏的静音）
 _PEAK_EPS = 0.0005
 
@@ -585,6 +618,10 @@ def session_active(exe_name):
     now = time.time()
     if peak > _PEAK_EPS:
         _peak_seen[exe_name] = now
+        # 新歌已经开始出声 = 加载结束，换歌宽限期立刻作废，
+        # 这样之后再静音就是真的暂停，不会因为宽限期而迟迟不报。
+        if _track.get('at'):
+            _track['at'] = 0.0
         return True
     last = _peak_seen.get(exe_name, 0.0)
     if now - last < _PEAK_SILENCE:
@@ -692,7 +729,11 @@ def query_now():
         if raw:
             t, a = split_song_title(raw)
             if t:
+                _note_track(t, a)
                 playing = session_active(exe)
+                # 刚换歌的几秒里播放器在加载，别把空档当成暂停
+                if playing is False and _just_switched():
+                    playing = True
                 data = {"title": t, "artist": a,
                         "status": "Paused" if playing is False else "Playing"}
     except Exception:
@@ -897,7 +938,10 @@ def _probe_player():
     if raw:
         t, a = split_song_title(raw)
         if t:
+            _note_track(t, a)
             playing = session_active(exe)
+            if playing is False and _just_switched():
+                playing = True
             data = {"title": t, "artist": a,
                     "status": "Paused" if playing is False else "Playing"}
 
