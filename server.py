@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import socket
 import socketserver
 import struct
@@ -370,7 +371,8 @@ if ($null -eq $s) {
 } else {
   $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
   $i = $s.GetPlaybackInfo()
-  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus } | ConvertTo-Json -Compress
+  $tl = $s.GetTimelineProperties()
+  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus; pos = [double]$tl.Position.TotalSeconds; dur = [double]$tl.EndTime.TotalSeconds } | ConvertTo-Json -Compress
 }
 """
 
@@ -447,36 +449,74 @@ def split_song_title(raw):
     return t.strip(), ""
 
 
-def netease_cover(title, artist):
-    """按歌名+歌手去网易云公开接口找封面，返回 JPEG/PNG 字节。"""
+def parse_lrc(text):
+    """把 LRC 文本解析成 [[秒, 歌词], ...]。"""
+    out = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = re.match(r"\[(\d+):(\d+(?:[.:]\d+)?)\](.*)", line)
+        if not m:
+            continue
+        mm, ss, words = m.group(1), m.group(2).replace(":", "."), m.group(3).strip()
+        if not words:
+            continue
+        try:
+            sec = int(mm) * 60 + float(ss)
+        except ValueError:
+            continue
+        out.append([round(sec, 2), words])
+    out.sort(key=lambda x: x[0])
+    return out[:400]
+
+
+def netease_meta(title, artist):
+    """按歌名+歌手取封面和歌词。返回 {"cover": bytes, "lyric": [[秒, 词], ...]}。"""
+    result = {"cover": b"", "lyric": []}
     if not title:
-        return b""
+        return result
     hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/"}
+
+    def fetch(url, timeout=5):
+        with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=timeout) as r:
+            return r.read()
+
     try:
         q = urllib.parse.quote(f"{title} {artist}".strip())
-        url = f"https://music.163.com/api/search/get/web?s={q}&type=1&limit=1&offset=0"
-        with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=5) as r:
-            data = json.loads(r.read().decode("utf-8", "replace"))
+        data = json.loads(fetch(
+            f"https://music.163.com/api/search/get/web?s={q}&type=1&limit=1&offset=0"
+        ).decode("utf-8", "replace"))
         songs = (data.get("result") or {}).get("songs") or []
         if not songs:
-            return b""
+            return result
         sid = songs[0].get("id")
         if not sid:
-            return b""
-        detail = f"https://music.163.com/api/song/detail/?id={sid}&ids=%5B{sid}%5D"
-        with urllib.request.urlopen(urllib.request.Request(detail, headers=hdr), timeout=5) as r:
-            d2 = json.loads(r.read().decode("utf-8", "replace"))
-        dsongs = d2.get("songs") or []
-        if not dsongs:
-            return b""
-        pic = (dsongs[0].get("album") or {}).get("picUrl")
-        if not pic:
-            return b""
-        pic = pic.split("?")[0] + "?param=200y200"
-        with urllib.request.urlopen(urllib.request.Request(pic, headers=hdr), timeout=6) as r:
-            return r.read()
+            return result
+
+        # 歌词
+        try:
+            ly = json.loads(fetch(
+                f"https://music.163.com/api/song/lyric?id={sid}&lv=-1&tv=-1"
+            ).decode("utf-8", "replace"))
+            result["lyric"] = parse_lrc((ly.get("lrc") or {}).get("lyric", ""))
+        except Exception:
+            pass
+
+        # 封面
+        try:
+            d2 = json.loads(fetch(
+                f"https://music.163.com/api/song/detail/?id={sid}&ids=%5B{sid}%5D"
+            ).decode("utf-8", "replace"))
+            dsongs = d2.get("songs") or []
+            pic = ((dsongs[0].get("album") or {}).get("picUrl") if dsongs else "") or ""
+            if pic:
+                result["cover"] = fetch(pic.split("?")[0] + "?param=200y200", timeout=6)
+        except Exception:
+            pass
     except Exception:
-        return b""
+        pass
+    return result
 
 
 def query_media():
@@ -516,17 +556,19 @@ def query_media():
                 if t:
                     data = {"title": t, "artist": a, "status": "Playing"}
 
-        # 3) 封面
+        # 3) 封面 + 歌词
         key = f"{data.get('title','')}|{data.get('artist','')}"
         if data.get("title"):
             if key not in _cover_cache:
-                img = netease_cover(data.get("title", ""), data.get("artist", ""))
-                if img:
-                    if len(_cover_cache) >= _COVER_MAX:
-                        _cover_cache.clear()
-                    _cover_cache[key] = img
-            if key in _cover_cache:
+                meta = netease_meta(data.get("title", ""), data.get("artist", ""))
+                if len(_cover_cache) >= _COVER_MAX:
+                    _cover_cache.clear()
+                _cover_cache[key] = meta
+            meta = _cover_cache.get(key) or {"cover": b"", "lyric": []}
+            if meta.get("cover"):
                 data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+            if meta.get("lyric"):
+                data["lyric"] = meta["lyric"]
 
         _media_cache["t"] = time.time()
         _media_cache["data"] = data
@@ -595,8 +637,11 @@ class Handler(socketserver.BaseRequestHandler):
                     self._http(sock, 403, b"", "text/plain")
                     return
                 want = params.get("h", [""])[0]
-                for k, img in list(_cover_cache.items()):
+                for k, meta in list(_cover_cache.items()):
                     if hashlib.md5(k.encode("utf-8")).hexdigest()[:12] == want:
+                        img = (meta or {}).get("cover") if isinstance(meta, dict) else meta
+                        if not img:
+                            break
                         ctype = "image/png" if img[:4] == b"\x89PNG" else "image/jpeg"
                         self._http(sock, 200, img, ctype)
                         return

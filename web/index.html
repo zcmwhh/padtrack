@@ -67,6 +67,12 @@
     background: rgba(16, 22, 30, .82);
     border: 1px solid rgba(120, 150, 180, .22);
     backdrop-filter: blur(8px);
+    transition: opacity .42s cubic-bezier(.32, .72, 0, 1),
+                transform .42s cubic-bezier(.32, .72, 0, 1);
+  }
+  #musicbar.hidden {
+    opacity: 0; pointer-events: none;
+    transform: translateX(-50%) translateY(-14px) scale(.94);
   }
   #musicbar button {
     width: 40px; height: 32px; border-radius: 8px; border: none;
@@ -113,6 +119,36 @@
   #numpad button:active { background: rgba(52, 70, 90, .95); }
   #numpad button.fn { font-size: 12px; color: #8fa3b8; }
 
+  /* 左侧滚动歌词：纯展示，pointer-events:none，不影响触控板 */
+  #lyrics {
+    position: fixed; left: 26px; top: 92px; bottom: 92px;
+    width: min(40vw, 480px); z-index: 15;
+    pointer-events: none; overflow: hidden;
+    opacity: 0; transform: translateY(12px) scale(.98);
+    transition: opacity .5s cubic-bezier(.32, .72, 0, 1),
+                transform .5s cubic-bezier(.32, .72, 0, 1);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  }
+  #lyrics.on { opacity: 1; transform: none; }
+  #lyricInner {
+    width: 100%; text-align: center;
+    transition: transform .55s cubic-bezier(.32, .72, 0, 1);
+    will-change: transform;
+  }
+  .lyric-line {
+    font-size: 16px; line-height: 2.05; color: #7f92a5;
+    opacity: .62; transform: scale(.97);
+    transition: color .4s ease, opacity .4s ease, transform .4s cubic-bezier(.32, .72, 0, 1);
+  }
+  .lyric-line.active {
+    color: #f2f8ff; opacity: 1; font-weight: 600; transform: scale(1);
+    text-shadow: 0 0 20px rgba(150, 200, 255, .45);
+  }
+  /* 有歌词时让中间的提示文字让位 */
+  body.has-lyrics #hint { opacity: 0 !important; }
+  #hint { transition: opacity .35s ease; }
+
   .topbar {
     position: fixed; right: 16px; top: calc(14px + env(safe-area-inset-top));
     display: flex; gap: 10px;
@@ -123,7 +159,8 @@
     color: #c7d5e3; font-size: 19px; display: grid; place-items: center;
     backdrop-filter: blur(8px); cursor: pointer;
   }
-  .round:active { background: rgba(45, 60, 78, .9); }
+  .round:active { background: rgba(45, 60, 78, .9); transform: scale(.9); }
+  .round { transition: transform .16s cubic-bezier(.32, .72, 0, 1), background .16s; }
   .round.on {
     border-color: rgba(62, 207, 142, .65);
     color: #3ecf8e;
@@ -152,11 +189,13 @@
   /* 键盘抽屉 */
   #kb {
     position: fixed; left: 0; right: 0; bottom: 0;
-    transform: translateY(110%); transition: transform .22s ease;
-    background: rgba(17, 23, 30, .97);
+    z-index: 40;                               /* 盖住歌词层和数字键层 */
+    transform: translateY(110%);
+    transition: transform .4s cubic-bezier(.32, .72, 0, 1);
+    background: #0d1319;                       /* 不透明，打字时背景不干扰视线 */
     border-top: 1px solid rgba(120, 150, 180, .2);
     padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
-    backdrop-filter: blur(10px);
+    box-shadow: 0 -18px 40px rgba(0, 0, 0, .45);
   }
   #kb.open { transform: translateY(0); }
   #ta {
@@ -327,7 +366,7 @@
 <div id="hud"><span id="dot"></span><span id="lat">连接中…</span></div>
 <div id="tip"></div>
 
-<div id="musicbar">
+<div id="musicbar" class="hidden">
   <img id="musicCover" alt="" />
   <span id="musicTitle">—</span>
   <button data-media="177" title="上一首">⏮</button>
@@ -336,6 +375,7 @@
 </div>
 
 <div id="numpad"></div>
+<div id="lyrics"><div id="lyricInner"></div></div>
 
 <div class="topbar">
   <button class="round" id="numBtn" title="数字键盘">▦</button>
@@ -565,10 +605,63 @@
     document.getElementById('numBtn').classList.add('on');
   }
 
-  /* ---------------- 媒体信息：轮询电脑上正在播放的曲目 ---------------- */
+  /* ---------------- 媒体信息 + 滚动歌词 ---------------- */
+  const musicBar = document.getElementById('musicbar');
   const musicTitle = document.getElementById('musicTitle');
   const musicCover = document.getElementById('musicCover');
+  const lyricsEl = document.getElementById('lyrics');
+  const lyricInner = document.getElementById('lyricInner');
+
   let lastMedia = '';
+  let lyricLines = [], lyricBase = 0, lyricClock = 0;
+  let lyricPlaying = false, lyricActive = -1, lyricSongKey = '';
+
+  function lyricTime() {
+    return lyricBase + (lyricPlaying ? (performance.now() - lyricClock) / 1000 : 0);
+  }
+
+  function paintLyric(force) {
+    if (!lyricLines.length) return;
+    const t = lyricTime();
+    let idx = -1;
+    for (let i = 0; i < lyricLines.length; i++) {
+      if (lyricLines[i][0] <= t) idx = i;
+      else break;
+    }
+    if (idx === lyricActive && !force) return;
+    lyricActive = idx;
+    const items = lyricInner.children;
+    for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
+    if (idx >= 0 && items[idx]) {
+      const h = lyricsEl.clientHeight;
+      const off = items[idx].offsetTop + items[idx].offsetHeight / 2;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - off)}px)`;
+    }
+  }
+
+  function setLyrics(lines, pos) {
+    lyricLines = Array.isArray(lines) ? lines : [];
+    lyricInner.innerHTML = '';
+    lyricActive = -1;
+    lyricBase = pos || 0;
+    lyricClock = performance.now();
+    lyricLines.forEach((row) => {
+      const el = document.createElement('div');
+      el.className = 'lyric-line';
+      el.textContent = row[1];
+      lyricInner.appendChild(el);
+    });
+    if (!lyricLines.length) {
+      lyricsEl.classList.remove('on');
+      document.body.classList.remove('has-lyrics');
+      return;
+    }
+    lyricsEl.classList.add('on');
+    document.body.classList.add('has-lyrics');
+    hint.style.display = 'none';
+    paintLyric(true);
+  }
+
   async function pollMedia() {
     try {
       const r = await fetch(`/media?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
@@ -577,32 +670,63 @@
       const key = (d.title || '') + '|' + (d.artist || '') + '|' + (d.status || '') + '|' + (d.cover || '');
       if (key === lastMedia) return;
       lastMedia = key;
+
       if (!d.title) {
-        musicTitle.textContent = d.status === 'none' ? '未在播放' : '—';
-        musicTitle.title = '';
+        // 没在播放：整条控制条和歌词一起收起来
+        musicBar.classList.add('hidden');
+        lyricsEl.classList.remove('on');
+        document.body.classList.remove('has-lyrics');
+        hint.style.display = '';
+        lyricLines = [];
+        lyricSongKey = '';
+        lyricPlaying = false;
         musicCover.classList.remove('on');
         musicCover.removeAttribute('src');
+        return;
+      }
+
+      musicBar.classList.remove('hidden');
+      musicTitle.textContent = d.artist ? `${d.title} · ${d.artist}` : d.title;
+      musicTitle.title = musicTitle.textContent;
+      if (d.cover) {
+        musicCover.src = `/cover?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(d.cover)}`;
+        musicCover.classList.add('on');
       } else {
-        musicTitle.textContent = d.artist ? `${d.title} · ${d.artist}` : d.title;
-        musicTitle.title = musicTitle.textContent;
-        if (d.cover) {
-          musicCover.src = `/cover?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(d.cover)}`;
-          musicCover.classList.add('on');
-        } else {
-          musicCover.classList.remove('on');
-          musicCover.removeAttribute('src');
-        }
+        musicCover.classList.remove('on');
+        musicCover.removeAttribute('src');
+      }
+
+      const songKey = `${d.title}|${d.artist}`;
+      const paused = d.status === 'Paused';
+
+      if (songKey !== lyricSongKey) {
+        lyricSongKey = songKey;
+        lyricPlaying = !paused;
+        setLyrics(d.lyric, d.pos);
+      } else if (typeof d.pos === 'number') {
+        // 播放器支持进度回传时，用它纠正漂移
+        lyricBase = d.pos;
+        lyricClock = performance.now();
+      }
+
+      if (paused && lyricPlaying) {
+        lyricBase = lyricTime();
+        lyricPlaying = false;
+      } else if (!paused && !lyricPlaying) {
+        lyricClock = performance.now();
+        lyricPlaying = true;
       }
     } catch (_) {}
   }
   pollMedia();
   setInterval(pollMedia, 5000);
+  setInterval(() => paintLyric(false), 220);
 
   pad.addEventListener('pointerdown', (e) => {
     if (!connected) return;
     try { pad.setPointerCapture(e.pointerId); } catch (_) {}
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    hint.style.opacity = '0';
+    hint.style.display = 'none';
 
     inertia = 0; velY = 0;
 
