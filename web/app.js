@@ -466,14 +466,23 @@
         anchorAt(nowMs);
       } else {
         if (typeof d.pos === 'number') {
-          // 播放器支持进度回传时，每次都以它为准，彻底不漂
-          lyricBase = d.pos;
-          lyricClock = nowMs;
-          anchorAt(nowMs);
+          // 播放器支持进度回传时以它为准；偏差小的时候不动，免得被采样误差拽着跳
+          const want = posBase(d.pos);
+          if (Math.abs(want - lyricTime()) > 3) {
+            lyricBase = want;
+            lyricClock = nowMs;
+            anchorAt(nowMs);
+          }
         }
         // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
         if (!lyricLines.length && d.lyric && d.lyric.length) {
           setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
+          anchorAt(nowMs);
+        }
+        // 有真实播放位置时，暂停/恢复也以它为准
+        if (typeof d.pos === 'number' && lyricLines.length) {
+          lyricBase = posBase(d.pos);
+          lyricClock = nowMs;
           anchorAt(nowMs);
         }
       }
@@ -685,6 +694,19 @@
       const d = await r.json();
       const k = (d.title || '') + '|' + (d.status || '');
       if (k !== nowKey) { nowKey = k; lastMedia = ''; changeAt = performance.now(); pollMedia(true); }
+      // 每秒用服务端的真实播放位置重锚，墙钟推算的误差就不会累积
+      if (typeof d.pos === 'number' && lyricLines.length && !uiPaused
+          && performance.now() > iconLockUntil) {
+        const want = posBase(d.pos);
+        // 死区：偏差超过 3 秒才重锚。暂停/恢复时 pos 会多算 1~2 秒，
+        // 不设死区的话歌词会在暂停后往前跳一下。
+        if (Math.abs(want - lyricTime()) > 3) {
+          lyricBase = want;
+          lyricClock = performance.now();
+          anchorAt(lyricClock);
+          paintLyric(false);
+        }
+      }
     } catch (_) {}
   }
   setInterval(pollNow, 1000);
@@ -725,6 +747,14 @@
       '  lines=' + lyricLines.length +
       '\n' + (lyricSongKey || '-');
   }, 250);
+
+  // 服务端给的 pos 是「这首歌播到哪」，单曲循环时会一直涨，
+  // 超过歌曲长度就绕回来；顺便把用户设置的偏移算进去
+  function posBase(posSec) {
+    let p = posSec;
+    if (songDur > 0 && p > songDur + 1) p = p % songDur;
+    return p + lyricOffset;
+  }
 
   // 把当前偏移显示出来（设置面板 + 左上角角标）
   const lyrOffVal = document.getElementById('lyrOffVal');

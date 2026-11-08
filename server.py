@@ -731,6 +731,34 @@ def netease_meta(title, artist):
 _now_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": "none"}}
 
 
+
+_CLOCK_LOCK = threading.Lock()
+_CLOCK = {"key": "", "pos": 0.0, "last": 0.0, "play": False}
+
+
+def _clock_tick(key, playing):
+    """按「真的在出声」的时长累计播放位置（秒）。
+
+    每被问一次，就把「上次到现在」这段时间按上次的电平状态累加进去。
+    没声音（暂停 / 加载 / 切歌空档）自然不累计。
+    """
+    now = time.time()
+    with _CLOCK_LOCK:
+        if key != _CLOCK["key"]:
+            _CLOCK.update(key=key, pos=0.0, last=now, play=bool(playing))
+            return 0.0
+        dt = now - _CLOCK["last"]
+        if dt < 0:
+            dt = 0.0
+        elif dt > 5.0:
+            dt = 5.0          # 休眠 / 长时间没被问，别一口气补太多
+        if _CLOCK["play"]:
+            _CLOCK["pos"] += dt
+        _CLOCK["last"] = now
+        _CLOCK["play"] = bool(playing)
+        return _CLOCK["pos"]
+
+
 def query_now():
     """只回答「现在放的是哪首、在不在放」，不碰网络，够快。"""
     now = time.time()
@@ -744,12 +772,16 @@ def query_now():
             t, a = split_song_title(raw)
             if t:
                 _note_track(t, a)
-                playing = session_active(exe)
+                raw_playing = session_active(exe)
                 # 刚换歌的几秒里播放器在加载，别把空档当成暂停
+                playing = raw_playing
                 if playing is False and _just_switched():
                     playing = True
                 data = {"title": t, "artist": a,
                         "status": "Paused" if playing is False else "Playing"}
+                if raw_playing is not None:
+                    # 自算播放位置：只在真的出声时累计，暂停/加载都不算
+                    data["pos"] = round(_clock_tick(t, bool(raw_playing)), 2)
     except Exception:
         pass
 
@@ -953,11 +985,14 @@ def _probe_player():
         t, a = split_song_title(raw)
         if t:
             _note_track(t, a)
-            playing = session_active(exe)
+            raw_playing = session_active(exe)
+            playing = raw_playing
             if playing is False and _just_switched():
                 playing = True
             data = {"title": t, "artist": a,
                     "status": "Paused" if playing is False else "Playing"}
+            if raw_playing is not None:
+                data["pos"] = round(_clock_tick(t, bool(raw_playing)), 2)
 
     # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
     if not data.get("title"):
