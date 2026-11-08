@@ -43,6 +43,7 @@
       radial-gradient(900px 600px at 85% 90%, #131a24 0%, transparent 70%);
   }
   #hint {
+    z-index: 10;
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     text-align: center; line-height: 2.1; font-size: 15px; color: #5d6b7a;
     pointer-events: none; transition: opacity .6s ease; padding: 0 24px;
@@ -577,6 +578,7 @@
 
   /* 设置面板 */
   #panel {
+    z-index: 75;                     /* 必须高于背景层与键盘层 */
     position: fixed; top: 50%; left: 50%;
     transform: translate(-50%, -45%) scale(.94);
     width: min(420px, calc(100vw - 40px));
