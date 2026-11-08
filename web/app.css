@@ -495,6 +495,17 @@
     mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
   }
   #lyrics.on { opacity: 1; transform: none; }
+  /* 作词/作曲：固定在歌词框上方的空隙里，单行、不参与滚动和高亮 */
+  #lyricCredits {
+    position: fixed; left: 26px; top: 60px;
+    width: min(40vw, 480px);
+    z-index: 16; pointer-events: none;
+    text-align: center; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+    font-size: 12.5px; line-height: 1.6; color: #8fa2b4;
+    opacity: 0; transition: opacity .5s ease;
+  }
+  #lyricCredits.on { opacity: .78; }
   #lyricInner {
     width: 100%; text-align: center;
     transition: transform .8s var(--ease-out);

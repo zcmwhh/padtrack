@@ -652,8 +652,12 @@ _META_LINE = re.compile(
 )
 
 
-def parse_lrc(text):
-    """把 LRC 文本解析成 [[秒, 歌词], ...]（去掉制作人员信息）。"""
+def parse_lrc(text, credits=None):
+    """把 LRC 文本解析成 [[秒, 歌词], ...]。
+
+    制作人员信息（作词/作曲/编曲…）不放进列表，传了 credits 就收集到里面，
+    由界面单独显示——否则它们会占住开头几秒，高亮停在上面不动。
+    """
     out = []
     for raw in (text or "").splitlines():
         line = raw.strip()
@@ -666,6 +670,8 @@ def parse_lrc(text):
         if not words:
             continue
         if _META_LINE.match(words):
+            if credits is not None and words not in credits and len(credits) < 6:
+                credits.append(words)
             continue
         try:
             sec = int(mm) * 60 + float(ss)
@@ -678,7 +684,7 @@ def parse_lrc(text):
 
 def netease_meta(title, artist):
     """按歌名+歌手取封面和歌词。返回 {"cover": bytes, "lyric": [[秒, 词], ...]}。"""
-    result = {"cover": b"", "lyric": [], "dur": 0}
+    result = {"cover": b"", "lyric": [], "dur": 0, "credits": []}
     if not title:
         return result
     hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/"}
@@ -704,7 +710,8 @@ def netease_meta(title, artist):
             ly = json.loads(fetch(
                 f"https://music.163.com/api/song/lyric?id={sid}&lv=-1&tv=-1"
             ).decode("utf-8", "replace"))
-            result["lyric"] = parse_lrc((ly.get("lrc") or {}).get("lyric", ""))
+            result["lyric"] = parse_lrc((ly.get("lrc") or {}).get("lyric", ""),
+                                        result["credits"])
         except Exception:
             pass
 
@@ -1032,6 +1039,8 @@ def query_media(force=False):
             data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
         if meta.get("lyric"):
             data["lyric"] = meta["lyric"]
+        if meta.get("credits"):
+            data["credits"] = meta["credits"]
         if meta.get("dur"):
             data["dur"] = meta["dur"]
 

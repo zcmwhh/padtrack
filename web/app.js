@@ -363,6 +363,16 @@
     }
   }
 
+  function setCredits(list) {
+    const box = document.getElementById('lyricCredits');
+    if (!box) return;
+    const rows = Array.isArray(list) ? list.slice(0, 3) : [];   // 作词/作曲/编曲，再多就截断了
+    if (!rows.length) { box.textContent = ''; box.classList.remove('on'); return; }
+    box.textContent = rows.join('  ·  ');
+    box.title = rows.join('\n');
+    box.classList.add('on');
+  }
+
   function setLyrics(lines, pos) {
     lyricLines = Array.isArray(lines) ? lines : [];
     lyricInner.innerHTML = '';
@@ -462,6 +472,7 @@
         }
         lyricSongKey = songKey;
         lyricPlaying = !paused;
+        setCredits(d.credits);
         setLyrics(d.lyric, base);
         anchorAt(nowMs);
       } else {
@@ -476,6 +487,7 @@
         }
         // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
         if (!lyricLines.length && d.lyric && d.lyric.length) {
+          setCredits(d.credits);
           setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
           anchorAt(nowMs);
         }
