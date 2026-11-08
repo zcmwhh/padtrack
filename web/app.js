@@ -290,7 +290,12 @@
   }
 
   const bgCoverEl = document.getElementById('bgCover');
-  const bgCoverImg = document.getElementById('bgCoverImg');
+  const bgLayers = [
+    document.getElementById('bgCoverA'),
+    document.getElementById('bgCoverB'),
+  ];
+  let bgFront = 0;             // 当前显示的是哪一层
+  let bgUrl = '';              // 当前背景对应的封面地址
 
   // 左侧栏和背景层各自独立开关；两个都关就完全不画
   function lyricsVisible() {
@@ -307,8 +312,31 @@
 
   // 封面背景：有封面且开关打开才显示
   function applyBgCover() {
-    const on = S.coverBg === true && !!bgCoverImg.getAttribute('src');
-    bgCoverEl.classList.toggle('on', on);
+    bgCoverEl.classList.toggle('on', S.coverBg === true && !!bgUrl);
+  }
+
+  // 换背景：新图在背面层加载好再淡入，旧图同时淡出
+  function setBgCover(url) {
+    if (url === bgUrl) return;
+    bgUrl = url || '';
+    if (!bgUrl) {
+      bgLayers.forEach((img) => { img.classList.remove('on'); img.removeAttribute('src'); });
+      applyBgCover();
+      return;
+    }
+    const front = bgLayers[bgFront];
+    const back = bgLayers[1 - bgFront];
+    if (front.getAttribute('src') === bgUrl) { applyBgCover(); return; }
+
+    const swap = () => {
+      back.classList.add('on');
+      front.classList.remove('on');
+      bgFront = 1 - bgFront;
+      applyBgCover();
+    };
+    back.src = bgUrl;
+    if (back.complete && back.naturalWidth) swap();
+    else back.onload = () => { back.onload = null; swap(); };
   }
 
   function paintLyric(force) {
@@ -379,8 +407,7 @@
         musicCover.classList.remove('on');
         musicCover.removeAttribute('src');
         musicCoverBig.removeAttribute('src');
-        bgCoverImg.removeAttribute('src');
-        applyBgCover();
+        setBgCover('');
         return;
       }
 
@@ -405,7 +432,7 @@
         if (musicCover.getAttribute('src') !== coverUrl) {
           musicCover.src = coverUrl;
           musicCoverBig.src = coverUrl;
-          bgCoverImg.src = coverUrl;
+          setBgCover(coverUrl);
         }
       } else {
         musicCover.removeAttribute('src');

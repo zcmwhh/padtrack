@@ -296,14 +296,19 @@
     opacity: 0; transition: opacity 1.1s var(--ease-out);
   }
   #bgCover.on { opacity: 1; }
-  #bgCoverImg {
+  .bgimg {
     position: absolute; inset: -12%;
     width: 124%; height: 124%;
     object-fit: cover;
     filter: blur(90px) saturate(1.7) brightness(.9);
     transform: scale(1.1);
     /* 只剩大块颜色，看不到任何细节 */
+    opacity: 0;
+    /* 切歌时交叉淡入淡出：新图慢一点进来，比原来硬换柔和 */
+    transition: opacity 1.4s var(--ease-out);
+    will-change: opacity;
   }
+  .bgimg.on { opacity: 1; }
   /* 压暗，保证上面的文字和控件清晰 */
   .bgscrim {
     position: absolute; inset: 0;
