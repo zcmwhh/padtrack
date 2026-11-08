@@ -7,9 +7,19 @@
 <title>PadTrack 触控板</title>
 <style>
   * { box-sizing: border-box; }
+  html {
+    background: #0d1117;          /* 窗口留白处也刷成主题色，不露黑边 */
+    overflow: hidden;
+  }
+  /* 全屏时浏览器给元素留的边也上色，避免出现黑条 */
+  :fullscreen { background: #0d1117 !important; }
+  :fullscreen::backdrop { background: #0d1117 !important; }
+  ::backdrop { background: #0d1117 !important; }
+
   html, body {
-    margin: 0; height: 100%; overflow: hidden;
+    margin: 0; height: 100%; overflow: hidden; width: 100%;
     background: #0d1117; color: #e6edf3;
+    overscroll-behavior: none;
     font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", sans-serif;
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
@@ -609,6 +619,7 @@
     <button class="mini" id="lyrBack">−5 秒</button>
     <button class="mini" id="lyrFwd">+5 秒</button>
   </div>
+  <div class="tip" id="buildLine" style="opacity:.6"></div>
   <div class="tip">
     线性绝对定位会绕开 Windows 指针加速，1:1 跟手，适合精细操作；
     玩 FPS 之类的游戏时关掉它，用默认的相对模式更兼容。<br>
@@ -1041,6 +1052,13 @@
     paintLyric(true);
     const dir = sec > 0 ? '快进' : '后退';
     flash('歌词' + dir + ' ' + Math.abs(sec) + ' 秒（累计 ' + lyricOffset + '）');
+  }
+  const buildLine = document.getElementById('buildLine');
+  if (buildLine) {
+    const t = new Date(performance.timeOrigin || Date.now());
+    const p = (n) => String(n).padStart(2, '0');
+    buildLine.textContent = '页面加载于 ' + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds()) +
+      '（浏览器显示旧界面时刷新一下）';
   }
   document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
   document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
