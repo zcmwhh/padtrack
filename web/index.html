@@ -391,6 +391,11 @@
   <div class="row"><span>自然滚动（手指推内容）</span><input type="checkbox" id="natural"></div>
   <div class="row"><span>线性绝对定位</span><input type="checkbox" id="absmode"></div>
   <div class="row"><span>全屏</span><button class="round" id="full" style="width:40px;height:40px;font-size:15px">⛶</button></div>
+  <div class="row">
+    <span>歌词同步</span>
+    <button class="mini" id="lyrBack">−5 秒</button>
+    <button class="mini" id="lyrFwd">+5 秒</button>
+  </div>
   <div class="tip">
     线性绝对定位会绕开 Windows 指针加速，1:1 跟手，适合精细操作；
     玩 FPS 之类的游戏时关掉它，用默认的相对模式更兼容。<br>
@@ -633,9 +638,11 @@
     const items = lyricInner.children;
     for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
     if (idx >= 0 && items[idx]) {
+      // 每行高度一致，直接用「行号 × 行高」算，避免 offsetParent 带来的偏差
       const h = lyricsEl.clientHeight;
-      const off = items[idx].offsetTop + items[idx].offsetHeight / 2;
-      lyricInner.style.transform = `translateY(${Math.round(h / 2 - off)}px)`;
+      const lh = items[0].offsetHeight || 33;
+      const center = h / 2 - (idx * lh + lh / 2);
+      lyricInner.style.transform = `translateY(${Math.round(center)}px)`;
     }
   }
 
@@ -721,6 +728,17 @@
   pollMedia();
   setInterval(pollMedia, 5000);
   setInterval(() => paintLyric(false), 220);
+
+  // 手动微调歌词进度：打开页面时歌已经在播一半，就靠这个对齐
+  function nudgeLyric(sec) {
+    if (!lyricLines.length) { flash('当前没有歌词'); return; }
+    lyricBase = Math.max(0, lyricTime() + sec);
+    lyricClock = performance.now();
+    paintLyric(true);
+    flash(sec > 0 ? '歌词快进 ' + sec + ' 秒' : '歌词后退 ' + (-sec) + ' 秒');
+  }
+  document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
+  document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
 
   pad.addEventListener('pointerdown', (e) => {
     if (!connected) return;

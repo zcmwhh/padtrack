@@ -407,6 +407,21 @@ def _exe_name(pid):
         k32.CloseHandle(h)
 
 
+NOISE_TITLES = ("桌面歌词", "迷你播放器", "网易云音乐", "云音乐", "Default IME",
+                "MSCTFIME UI", "Program Manager", "QQ音乐", "酷狗音乐")
+
+
+def _is_noise_title(title):
+    if not title:
+        return True
+    for bad in NOISE_TITLES:
+        if title == bad or title.startswith(bad + " "):
+            return True
+    if title.startswith("GDI+ Window") or title.startswith("Default IME"):
+        return True
+    return False
+
+
 def player_window_title():
     """从正在播放的软件窗口标题里取「歌名 - 歌手」。
 
@@ -418,8 +433,6 @@ def player_window_title():
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def cb(hwnd, _):
-        if not u32.IsWindowVisible(hwnd):
-            return True
         n = u32.GetWindowTextLengthW(hwnd)
         if n <= 0:
             return True
@@ -430,12 +443,46 @@ def player_window_title():
             return True
         pid = wintypes.DWORD()
         u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if _exe_name(pid.value) in PLAYER_PROCS:
-            found.append(title)
+        exe = _exe_name(pid.value)
+        if exe in PLAYER_PROCS and not _is_noise_title(title):
+            found.append((title, exe, bool(u32.IsWindowVisible(hwnd))))
         return True
 
     u32.EnumWindows(cb, 0)
-    return found[0] if found else ""
+    if not found:
+        return "", ""
+    # 优先可见窗口、优先带「歌名 - 歌手」格式的
+    found.sort(key=lambda r: (r[2], " - " in r[0]), reverse=True)
+    return found[0][0], found[0][1]
+
+
+def session_active(exe_name):
+    """这个进程的音频会话是否在出声。True=在放, False=静音/暂停, None=判断不了。"""
+    if not exe_name:
+        return None
+    try:
+        import comtypes
+        comtypes.CoInitialize()
+    except Exception:
+        pass
+    try:
+        from pycaw.pycaw import AudioUtilities
+    except Exception:
+        return None
+    seen = False
+    try:
+        for s in AudioUtilities.GetAllSessions():
+            try:
+                proc = s.Process
+                if proc and proc.name().lower() == exe_name:
+                    seen = True
+                    if s.State == 1:
+                        return True
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return False if seen else None
 
 
 def split_song_title(raw):
@@ -529,32 +576,35 @@ def query_media():
         if time.time() - _media_cache["t"] < 4.0:
             return _media_cache["data"]
 
-        # 1) 先问系统媒体控制（Spotify / QQ 音乐新版 / 浏览器都走这条）
-        try:
-            script = os.path.join(tempfile.gettempdir(), "padtrack_media.ps1")
-            if not os.path.exists(script):
-                with open(script, "w", encoding="utf-8") as f:
-                    f.write(MEDIA_PS)
-            out = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=8, creationflags=0x08000000,
-            ).stdout.strip()
-            for line in reversed(out.splitlines()):
-                line = line.strip()
-                if line.startswith("{") and line.endswith("}"):
-                    data = json.loads(line)
-                    break
-        except Exception:
-            pass
+        # 1) 先看本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放
+        #    （网易云走这条，它不注册系统媒体控制）
+        raw, exe = player_window_title()
+        if raw:
+            t, a = split_song_title(raw)
+            if t:
+                playing = session_active(exe)
+                data = {"title": t, "artist": a,
+                        "status": "Paused" if playing is False else "Playing"}
 
-        # 2) 拿不到就从播放器窗口标题里抠（网易云走这条）
+        # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
         if not data.get("title"):
-            raw = player_window_title()
-            if raw:
-                t, a = split_song_title(raw)
-                if t:
-                    data = {"title": t, "artist": a, "status": "Playing"}
+            try:
+                script = os.path.join(tempfile.gettempdir(), "padtrack_media.ps1")
+                if not os.path.exists(script):
+                    with open(script, "w", encoding="utf-8") as f:
+                        f.write(MEDIA_PS)
+                out = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=8, creationflags=0x08000000,
+                ).stdout.strip()
+                for line in reversed(out.splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        data = json.loads(line)
+                        break
+            except Exception:
+                pass
 
         # 3) 封面 + 歌词
         key = f"{data.get('title','')}|{data.get('artist','')}"
