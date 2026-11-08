@@ -256,30 +256,40 @@
 
 
   /* ---------------- 可拖动的进度条 ---------------- */
+  .isle-barrow {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 1px;
+  }
   .isle-bar {
-    position: relative; height: 16px; margin-top: 1px;
+    position: relative; flex: 1; height: 14px;
     display: flex; align-items: center; cursor: pointer;
     touch-action: none;
   }
   .isle-bar::before {
-    content: ''; position: absolute; left: 0; right: 0; height: 4px;
-    border-radius: 2px; background: rgba(120, 150, 180, .2);
+    content: ''; position: absolute; left: 0; right: 0; height: 3px;
+    border-radius: 3px; background: rgba(140, 160, 180, .16);
   }
   .isle-bar i {
-    position: relative; height: 4px; width: 0%; border-radius: 2px;
-    background: linear-gradient(90deg, #5eb8ff, #6ee7b7);
-    transition: width .55s linear;
+    position: relative; height: 3px; width: 0%; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(110, 190, 255, .9), rgba(110, 231, 183, .95));
+    box-shadow: 0 0 8px rgba(110, 231, 183, .35);
+    transition: width .6s linear;
     pointer-events: none;
   }
   .isle-bar.dragging i { transition: none; }
   .isle-bar::after {
-    content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%;
-    background: #eaf2f8; box-shadow: 0 0 10px rgba(110, 231, 183, .6);
-    left: calc(var(--p, 0) * 1% - 6px); opacity: 0;
+    content: ''; position: absolute; width: 9px; height: 9px; border-radius: 50%;
+    background: #eaf2f8;
+    left: calc(var(--p, 0) * 1% - 4.5px);
+    opacity: 0; transform: scale(.5);
     transition: opacity .2s ease, transform .2s var(--ease-spring);
-    transform: scale(.6); pointer-events: none;
+    pointer-events: none;
   }
-  .isle-bar.dragging::after, .isle-bar:hover::after { opacity: 1; transform: scale(1); }
+  .isle-bar.dragging::after { opacity: 1; transform: scale(1); }
+  #musicTime {
+    flex: none; font-size: 10.5px; color: #7d8fa1; letter-spacing: .2px;
+    font-variant-numeric: tabular-nums;
+  }
 
   /* ---------------- 歌单抽屉 ---------------- */
   #sheetMask {
@@ -685,7 +695,7 @@
     <div class="isle-meta">
       <div id="musicTitleFull">—</div>
       <div id="musicArtist"></div>
-      <div class="isle-bar" id="seekBar"><i id="musicProg"></i></div>
+      <div class="isle-barrow"><div class="isle-bar" id="seekBar"><i id="musicProg"></i></div><span id="musicTime">0:00</span></div>
     </div>
     <div class="isle-ctrl">
       <button id="plBtn" aria-label="歌单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="18.5" cy="15.5" r="2.2"/><path d="M20.7 15.5V8.4l-4 1"/></svg></button>
@@ -951,6 +961,7 @@
   const musicCoverBig = document.getElementById('musicCoverBig');
   const musicWave = document.getElementById('musicWave');
   const musicProg = document.getElementById('musicProg');
+  const musicTime = document.getElementById('musicTime');
   let islandTimer = 0, songDur = 0, songAnchor = 0;
 
   // 展开的二级菜单：只要开始干别的就收回去
@@ -1306,6 +1317,8 @@
     }
     const p = Math.max(0, Math.min(1, lyricTime() / songDur));
     musicProg.style.width = (p * 100).toFixed(1) + '%';
+    seekBar.style.setProperty('--p', (p * 100).toFixed(1));
+    musicTime.textContent = fmtTime(lyricTime()) + ' / ' + fmtTime(songDur);
   }
   setInterval(() => { paintLyric(false); paintProgress(); }, 220);
 
