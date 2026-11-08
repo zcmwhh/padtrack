@@ -39,6 +39,10 @@
     ws.onerror = () => {};
     ws.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+      if (d.t === 'vol') {
+        applyVolume(d);
+        return;
+      }
       if (d.t === 'pong') {
         const rtt = Math.round(performance.now() - d.ts);
         rtts.push(rtt);
@@ -524,6 +528,8 @@
   }
   pollMedia();
   setInterval(pollMedia, 3000);
+  fetchVolume();
+  setInterval(fetchVolume, 5000);   // 用键盘或系统面板调了音量，这边也能跟上
   // 切到后台时定时器会被节流，回来立刻补一次，别让界面停在旧状态
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
@@ -792,6 +798,110 @@
       offBadge.textContent = v === 0 ? '' : '歌词偏移 ' + txt;
       offBadge.classList.toggle('on', v !== 0);
     }
+  }
+
+  // ---------------- 系统音量 ----------------
+  const volRow = document.getElementById('volRow');
+  const volBar = document.getElementById('volBar');
+  const volFill = document.getElementById('volFill');
+  const volKnob = document.getElementById('volKnob');
+  const volPct = document.getElementById('volPct');
+  const volMute = document.getElementById('volMute');
+  let volLevel = 0.5, volMuted = false, volKnown = false;
+
+  function applyVolume(d) {
+    if (!d) return;
+    if (d.ok === false) {           // 没装 pycaw：整行藏起来
+      volKnown = false;
+      if (volRow) volRow.classList.add('hide');
+      return;
+    }
+    volKnown = true;
+    if (typeof d.level === 'number') volLevel = Math.max(0, Math.min(1, d.level));
+    if (typeof d.muted === 'boolean') volMuted = d.muted;
+    paintVolume();
+  }
+
+  function paintVolume() {
+    if (!volRow) return;
+    volRow.classList.toggle('hide', !volKnown);
+    if (!volKnown) return;
+    const pct = Math.round((volMuted ? 0 : volLevel) * 100);
+    const w = (volLevel * 100) + '%';
+    volFill.style.width = w;
+    volKnob.style.left = w;
+    volPct.textContent = volMuted ? '静音' : pct + '%';
+    volMute.classList.toggle('muted', volMuted);
+    document.getElementById('volX').style.display = volMuted ? '' : 'none';
+    document.getElementById('volWave1').style.display = volMuted ? 'none' : '';
+    document.getElementById('volWave2').style.display = volMuted ? 'none' : '';
+  }
+
+  async function fetchVolume() {
+    try {
+      const r = await fetch(`/volume?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      applyVolume(await r.json());
+    } catch (_) { /* 网络抖动就算了，下次轮询再来 */ }
+  }
+
+  // 拖动：本地先跟手，再按 60ms 节流发 WS
+  let volDragging = false, volLastSend = 0, volPending = -1;
+  function volRatio(e) {
+    const r = volBar.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  }
+  function volApplyLocal(v) {
+    volLevel = v;
+    volMuted = false;
+    paintVolume();
+  }
+  function volSend(force) {
+    const now = performance.now();
+    if (!force && now - volLastSend < 60) return;
+    if (volPending < 0) return;
+    volLastSend = now;
+    send({ t: 'vol', v: volPending, mute: false });
+    volPending = -1;
+  }
+  if (volBar) {
+    volBar.addEventListener('pointerdown', (e) => {
+      if (!volKnown) return;
+      volDragging = true;
+      volBar.classList.add('dragging');
+      try { volBar.setPointerCapture(e.pointerId); } catch (_) {}
+      const v = volRatio(e);
+      volApplyLocal(v);
+      volPending = v;
+      volSend(true);
+      e.preventDefault();
+    });
+    volBar.addEventListener('pointermove', (e) => {
+      if (!volDragging) return;
+      const v = volRatio(e);
+      volApplyLocal(v);
+      volPending = v;
+      volSend(false);
+    });
+    const endDrag = (e) => {
+      if (!volDragging) return;
+      volDragging = false;
+      volBar.classList.remove('dragging');
+      if (volPending >= 0) volSend(true);
+      setTimeout(fetchVolume, 120);       // 以服务端实际值为准
+      e.preventDefault();
+    };
+    volBar.addEventListener('pointerup', endDrag);
+    volBar.addEventListener('pointercancel', endDrag);
+  }
+  if (volMute) {
+    volMute.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!volKnown) return;
+      volMuted = !volMuted;
+      paintVolume();
+      send({ t: 'vol', mute: volMuted });
+      setTimeout(fetchVolume, 150);
+    });
   }
 
   // 手动微调歌词进度：打开页面时歌已经在播一半，就靠这个对齐

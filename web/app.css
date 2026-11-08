@@ -190,7 +190,7 @@
 
   /* 小屏时展开态收紧一点，避免贴边 */
   @media (max-width: 640px) {
-    #island.exp { width: 94vw; height: 88px; padding-right: 6px; }
+    #island.exp { width: 94vw; height: 128px; padding-right: 6px; }
     .isle-cover.big { width: 52px; height: 52px; }
   }
 
@@ -264,7 +264,49 @@
 
   /* ---------------- 展开态：两行迷你播放器 ---------------- */
   #island.exp {
-    width: min(94vw, 430px); height: 140px; border-radius: 30px;
+    width: min(94vw, 430px); height: 186px; border-radius: 30px;
+  }
+
+  /* 展开态的音量条 */
+  .isle-vol {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 0 4px; margin-top: 2px;
+  }
+  .isle-vol.hide { display: none; }
+  .volmute {
+    width: 32px; height: 32px; flex: none; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: none; color: #c7d5e3;
+    transition: color .18s ease, transform .18s var(--ease-spring);
+  }
+  .volmute svg { width: 19px; height: 19px; }
+  .volmute:active { transform: scale(.86); }
+  .volmute.muted { color: #ff9f6e; }
+  /* 滑条本体：细轨 + 填充 + 圆点，触摸目标做高一点好按住 */
+  .volbar {
+    position: relative; flex: 1; height: 30px;
+    display: flex; align-items: center;
+    touch-action: none; cursor: pointer;
+  }
+  .volbar::before {
+    content: ''; position: absolute; left: 0; right: 0; height: 5px;
+    border-radius: 3px; background: rgba(120, 150, 180, .22);
+  }
+  #volFill {
+    position: absolute; left: 0; height: 5px; border-radius: 3px;
+    background: linear-gradient(90deg, #3ecf8e, #7fe0b4);
+    transition: width .12s linear;
+  }
+  #volKnob {
+    position: absolute; width: 15px; height: 15px; border-radius: 50%;
+    background: #eaf6ff; transform: translateX(-50%);
+    box-shadow: 0 0 10px rgba(130, 200, 255, .55);
+    transition: left .12s linear;
+  }
+  .volbar.dragging #volKnob { box-shadow: 0 0 16px rgba(130, 220, 255, .85); }
+  .volpct {
+    flex: none; min-width: 40px; text-align: right;
+    font-size: 12px; color: #9fb0c2; font-variant-numeric: tabular-nums;
   }
   .isle-full {
     flex-direction: column; justify-content: center; align-items: stretch;

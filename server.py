@@ -279,6 +279,17 @@ def handle_message(msg):
             act_tap(VK["back"])
     elif t == "cfg":
         _state["abs"] = bool(msg.get("abs", False))
+    elif t == "vol":
+        lv = msg.get("v")
+        mu = msg.get("mute")
+        ok = set_speaker_volume(
+            None if lv is None else float(lv),
+            None if mu is None else bool(mu))
+        level, muted = speaker_volume()
+        out = volume_payload(level, muted)
+        out["t"] = "vol"
+        out["ok"] = bool(ok and out.get("ok"))
+        return out
     elif t == "ping":
         return {"t": "pong", "ts": msg.get("ts", 0)}
     return None
@@ -766,6 +777,42 @@ def _clock_tick(key, playing):
         return _CLOCK["pos"]
 
 
+def speaker_volume():
+    """读系统主音量。返回 (0~1 的音量, 是否静音)；拿不到返回 (None, None)。"""
+    _ensure_com()
+    try:
+        from pycaw.pycaw import AudioUtilities
+        ev = AudioUtilities.GetSpeakers().EndpointVolume
+        return float(ev.GetMasterVolumeLevelScalar()), bool(ev.GetMute())
+    except Exception:
+        return None, None
+
+
+def set_speaker_volume(level=None, muted=None):
+    """设置系统主音量/静音。返回是否成功。"""
+    _ensure_com()
+    try:
+        from pycaw.pycaw import AudioUtilities
+        ev = AudioUtilities.GetSpeakers().EndpointVolume
+        if level is not None:
+            level = max(0.0, min(1.0, float(level)))
+            ev.SetMasterVolumeLevelScalar(level, None)
+            # 从 0 往上拉就直接取消静音，符合一般直觉
+            if level > 0.001 and ev.GetMute():
+                ev.SetMute(0, None)
+        if muted is not None:
+            ev.SetMute(1 if muted else 0, None)
+        return True
+    except Exception:
+        return False
+
+
+def volume_payload(level, muted):
+    if level is None:
+        return {"ok": False, "reason": "no-pycaw"}
+    return {"ok": True, "level": round(level, 3), "muted": bool(muted)}
+
+
 def query_now():
     """只回答「现在放的是哪首、在不在放」，不碰网络，够快。"""
     now = time.time()
@@ -1142,6 +1189,31 @@ class Handler(socketserver.BaseRequestHandler):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/volume":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                raw_v = params.get("v", [None])[0]
+                raw_m = params.get("mute", [None])[0]
+                if raw_v is not None or raw_m is not None:
+                    lv = None
+                    if raw_v is not None:
+                        try:
+                            lv = float(raw_v)
+                        except ValueError:
+                            lv = None
+                        if lv is not None and lv > 1.5:      # 也接受 0~100
+                            lv = lv / 100.0
+                    mu = None
+                    if raw_m is not None:
+                        mu = raw_m not in ("0", "false", "")
+                    set_speaker_volume(lv, mu)
+                level, muted = speaker_volume()
+                body = json.dumps(volume_payload(level, muted),
+                                  ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
