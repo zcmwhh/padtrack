@@ -266,6 +266,29 @@
 
   let lastMedia = '';
   let uiPaused = false;          // 界面认为当前是否暂停
+  let songStartPending = false;  // 这首歌还没真正开始过（用于起步补偿）
+  let fastPollUntil = 0;         // 切歌后的一小段高频轮询窗口
+
+  // 歌词时钟只跟「真的有没有声音」走：没声音（加载/暂停/卡顿）就冻住
+  function applyAudible(audible, nowMs) {
+    if (audible === null) return;
+    if (performance.now() < iconLockUntil) return;   // 刚点过按钮，以用户操作为准
+    if (!audible && lyricPlaying) {
+      lyricBase = lyricTime();
+      lyricPlaying = false;
+      lyricClock = nowMs;
+      anchorAt(nowMs);
+    } else if (audible && !lyricPlaying && !uiPaused) {
+      lyricClock = nowMs;
+      if (songStartPending) {
+        // 每秒采样最多晚不到 1 拍，补回半拍
+        lyricBase += 0.3;
+        songStartPending = false;
+      }
+      lyricPlaying = true;
+      anchorAt(nowMs);
+    }
+  }
   let iconLockUntil = 0;         // 刚点过按钮的一小段时间内不被轮询覆盖
 
   let paintedPaused = null;
@@ -459,6 +482,8 @@
         const base = typeof d.pos === 'number' ? d.pos : 0;
         lyricSongKey = songKey;
         lyricPlaying = false;          // 先冻住，等 audible
+        songStartPending = true;
+        fastPollUntil = nowMs + 6000;  // 接下来 6 秒高频问一次，尽快发现出声
         setLyrics(d.lyric, base);
         anchorAt(nowMs);
       } else {
@@ -484,19 +509,8 @@
       // audible 为 null 表示拿不到音频电平（没装 pycaw），这时退回用播放状态
       let audible = d.audible === true ? true : (d.audible === false ? false : null);
       if (audible === null) audible = !paused;
+      applyAudible(audible, nowMs);
       if (performance.now() > iconLockUntil) {
-        if (audible === false && lyricPlaying) {
-          lyricBase = lyricTime();
-          lyricPlaying = false;
-          lyricClock = nowMs;
-          anchorAt(nowMs);
-        } else if (audible === true && !lyricPlaying && !paused) {
-          lyricClock = nowMs;
-          // 上一次采样可能最多晚了 1 秒才发现有声音，补半个轮询间隔
-          lyricBase += 0.5;
-          lyricPlaying = true;
-          anchorAt(nowMs);
-        }
         uiPaused = paused;
         paintPlayIcon();
       }
@@ -685,11 +699,16 @@
       const r = await fetch(`/now?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();
+      // 时钟启停跟着这个 1 秒一次的快速轮询走，别等 3 秒一次的 /media
+      applyAudible(d.audible === true ? true : (d.audible === false ? false : null),
+                   performance.now());
       const k = (d.title || '') + '|' + (d.status || '');
       if (k !== nowKey) { nowKey = k; lastMedia = ''; changeAt = performance.now(); pollMedia(true); }
     } catch (_) {}
   }
   setInterval(pollNow, 1000);
+  // 切歌后的 6 秒里用 350ms 轮询，让歌词尽快起步
+  setInterval(() => { if (performance.now() < fastPollUntil) pollNow(); }, 350);
   function paintProgress() {
     if (!songDur) { musicProg.style.width = '0%'; return; }
     const t = lyricTime();
