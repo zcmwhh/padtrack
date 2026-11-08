@@ -83,7 +83,9 @@
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
   let lastTapX = 0, lastTapY = 0;      // 上一次点击落点，用来判断是不是真的双击
-  const DBL_SLOP = 24;                 // 两次点击允许的位置偏差（触屏放宽到 24px）
+  const DBL_SLOP = 12;                 // 两次点击允许的位置偏差（收紧，避免误判成双击）
+  const DBL_MS = 300;                  // 两次点击的最大间隔（人手双击一般在 250ms 内）
+  const DBL_MOVE = 14;                 // 第二下按下后要真的移动这么远才开拖
   const HOLD_MS = 420;                 // 按住多久算拖动
 
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
@@ -972,7 +974,7 @@
       // 只有「时间短 + 位置几乎没变」才算双击的第二下。
       // 以前只看时间，导致点完图标随手一划就被当成拖动。
       const nearLastTap = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) <= DBL_SLOP;
-      if (performance.now() - lastTapEnd < 500 && nearLastTap) {
+      if (performance.now() - lastTapEnd < DBL_MS && nearLastTap) {
         // 双击的第二下：先不按左键，等手指一动才发 dblstart。
         // dblstart 会先挪 8px 再按下，破坏双击的位置容差，
         // 所以拖的时候标题栏不会被判成双击最大化；
@@ -1024,7 +1026,7 @@
         clearTimeout(lpTimer);
         lastCX = sx; lastCY = sy;
       }
-      if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > 8) {
+      if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > DBL_MOVE) {
         mode = 'drag';
         send({ t: 'dblstart' });
         flash('拖动');
