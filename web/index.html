@@ -293,6 +293,37 @@
   .islemode { width: 30px; height: 30px; }
   .islemode svg { width: 17px; height: 17px; }
 
+
+  /* ---------------- 歌词铺满背景 ---------------- */
+  #bgLyrics {
+    position: fixed; inset: 0; z-index: 5;
+    pointer-events: none; overflow: hidden;
+    opacity: 0; transition: opacity .8s var(--ease-out);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 78%, transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 78%, transparent 100%);
+  }
+  #bgLyrics.on { opacity: 1; }
+  #bgInner {
+    position: absolute; left: 0; right: 0; top: 0;
+    padding: 0 6vw; text-align: center;
+    transition: transform 1s var(--ease-out);
+    will-change: transform;
+  }
+  .bg-line {
+    font-size: clamp(26px, 4.6vw, 62px);
+    line-height: 1.65; font-weight: 700; letter-spacing: .5px;
+    color: rgba(210, 228, 245, .085);
+    filter: blur(2px);
+    transform: scale(.985);
+    transition: color 1s ease, filter 1s ease, transform 1s var(--ease-spring);
+  }
+  .bg-line.active {
+    color: rgba(220, 238, 255, .26);
+    filter: blur(0);
+    transform: scale(1);
+    text-shadow: 0 0 60px rgba(120, 190, 255, .18);
+  }
+
   /* ---------------- 可拖动的进度条 ---------------- */
   .isle-barrow {
     display: flex; align-items: center; gap: 8px;
@@ -815,6 +846,7 @@
 
 <div id="numpad"></div>
 <div id="lyrics"><div id="lyricInner"></div></div>
+<div id="bgLyrics"><div id="bgInner"></div></div>
 
 <div id="sheetMask"></div>
 <div id="plSheet">
@@ -837,6 +869,8 @@
   <div class="row"><span>指针加速</span><input type="checkbox" id="accel"></div>
   <div class="row"><span>自然滚动（手指推内容）</span><input type="checkbox" id="natural"></div>
   <div class="row"><span>线性绝对定位</span><input type="checkbox" id="absmode"></div>
+  <div class="row"><span>滚动歌词</span><input type="checkbox" id="lyrOn"></div>
+  <div class="row"><span>歌词铺满背景</span><input type="checkbox" id="lyrBg"></div>
   <div class="row"><span>全屏</span><button class="round" id="full" style="width:40px;height:40px;font-size:15px">⛶</button></div>
   <div class="row">
     <span>歌词同步</span>
@@ -919,7 +953,7 @@
 
   /* ---------------- 连接 ---------------- */
   const S = Object.assign(
-    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0 },
+    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0, lyrOn: true, lyrBg: false },
     JSON.parse(localStorage.getItem('padtrack') || '{}')
   );
   const saveS = () => localStorage.setItem('padtrack', JSON.stringify(S));
@@ -1105,6 +1139,22 @@
     return lyricBase + (lyricPlaying ? (performance.now() - lyricClock) / 1000 : 0);
   }
 
+  const bgLyricsEl = document.getElementById('bgLyrics');
+  const bgInner = document.getElementById('bgInner');
+
+  // 左侧栏和背景层各自独立开关；两个都关就完全不画
+  function lyricsVisible() {
+    return S.lyrOn !== false || S.lyrBg === true;
+  }
+
+  function applyLyricToggles() {
+    const has = lyricLines.length > 0 && lyricsVisible();
+    lyricsEl.classList.toggle('on', has && S.lyrOn !== false);
+    bgLyricsEl.classList.toggle('on', has && S.lyrBg === true);
+    document.body.classList.toggle('has-lyrics', has);
+    hint.style.display = has ? 'none' : '';
+  }
+
   function paintLyric(force) {
     if (!lyricLines.length) return;
     const t = lyricTime();
@@ -1115,37 +1165,48 @@
     }
     if (idx === lyricActive && !force) return;
     lyricActive = idx;
+
+    // 左侧滚动栏
     const items = lyricInner.children;
     for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
     if (idx >= 0 && items[idx]) {
-      // 每行高度一致，直接用「行号 × 行高」算，避免 offsetParent 带来的偏差
       const h = lyricsEl.clientHeight;
       const lh = items[0].offsetHeight || 33;
-      const center = h / 2 - (idx * lh + lh / 2);
-      lyricInner.style.transform = `translateY(${Math.round(center)}px)`;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (idx * lh + lh / 2))}px)`;
+    }
+
+    // 全屏背景层
+    const bgs = bgInner.children;
+    if (bgs.length) {
+      for (let i = 0; i < bgs.length; i++) bgs[i].classList.toggle('active', i === idx);
+      if (idx >= 0 && bgs[idx]) {
+        const h = window.innerHeight;
+        const lh = bgs[0].offsetHeight || 90;
+        bgInner.style.transform = `translateY(${Math.round(h / 2 - (idx * lh + lh / 2))}px)`;
+      }
     }
   }
 
   function setLyrics(lines, pos) {
     lyricLines = Array.isArray(lines) ? lines : [];
     lyricInner.innerHTML = '';
+    bgInner.innerHTML = '';
     lyricActive = -1;
     lyricBase = (pos || 0) + lyricOffset;
     lyricClock = performance.now();
     lyricLines.forEach((row) => {
-      const el = document.createElement('div');
-      el.className = 'lyric-line';
-      el.textContent = row[1];
-      lyricInner.appendChild(el);
+      const a = document.createElement('div');
+      a.className = 'lyric-line';
+      a.textContent = row[1];
+      lyricInner.appendChild(a);
+
+      const b = document.createElement('div');
+      b.className = 'bg-line';
+      b.textContent = row[1];
+      bgInner.appendChild(b);
     });
-    if (!lyricLines.length) {
-      lyricsEl.classList.remove('on');
-      document.body.classList.remove('has-lyrics');
-      return;
-    }
-    lyricsEl.classList.add('on');
-    document.body.classList.add('has-lyrics');
-    hint.style.display = 'none';
+    applyLyricToggles();
+    if (!lyricLines.length) return;
     paintLyric(true);
   }
 
@@ -1171,6 +1232,7 @@
         lyricLines = [];
         lyricSongKey = '';
         lyricPlaying = false;
+        applyLyricToggles();
         musicCover.classList.remove('on');
         musicCover.removeAttribute('src');
         return;
@@ -1469,6 +1531,18 @@
     buildLine.textContent = '页面加载于 ' + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds()) +
       '（浏览器显示旧界面时刷新一下）';
   }
+  const lyrOnBox = document.getElementById('lyrOn');
+  const lyrBgBox = document.getElementById('lyrBg');
+  lyrOnBox.checked = S.lyrOn !== false;
+  lyrBgBox.checked = S.lyrBg === true;
+  lyrOnBox.addEventListener('change', () => {
+    S.lyrOn = lyrOnBox.checked; saveS(); applyLyricToggles();
+    flash(S.lyrOn ? '滚动歌词：开' : '滚动歌词：关');
+  });
+  lyrBgBox.addEventListener('change', () => {
+    S.lyrBg = lyrBgBox.checked; saveS(); applyLyricToggles(); paintLyric(true);
+    flash(S.lyrBg ? '歌词铺满背景：开' : '歌词铺满背景：关');
+  });
   document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
   document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
   document.getElementById('lyrReset').addEventListener('click', () => {
