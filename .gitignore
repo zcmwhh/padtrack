@@ -1,17 +1,17 @@
 # 运行产物
 padtrack.log
 padtrack.pid
+padtrack_*.ps1
 key.txt
 当前地址.txt
 
 # 本地备份（每次改动前的快照）
 backup/
 
-# 打包产物
+# 打包产物（PadTrack.spec 是构建配置，故意纳入版本管理）
 build/
 dist/
 发布/
-*.spec
 
 # Python
 __pycache__/
