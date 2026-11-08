@@ -259,17 +259,17 @@ def handle_message(msg):
         if msg.get("dx"):
             act_hwheel(msg["dx"])
     elif t == "zoom":
-        act_zoom(int(msg.get("d", 0)))
+        act_zoom(int(msg.get("d") or 0))
     elif t == "dblstart":
         act_drag_start()
     elif t == "k":
-        act_tap(int(msg.get("vk", 0)))
+        act_tap(int(msg.get("vk") or 0))
     elif t == "ks":
-        act_combo(msg.get("mods", []), int(msg.get("vk", 0)))
+        act_combo(msg.get("mods", []), int(msg.get("vk") or 0))
     elif t == "txt":
         act_text(str(msg.get("s", "")))
     elif t == "bs":
-        n = max(0, min(int(msg.get("n", 1)), 300))
+        n = max(0, min(int(msg.get("n") or 1), 300))
         for _ in range(n):
             act_tap(VK["back"])
     elif t == "cfg":
@@ -1044,11 +1044,17 @@ class Handler(socketserver.BaseRequestHandler):
                     continue
                 if not isinstance(msg, dict):
                     continue
-                reply = handle_message(msg)
+                try:
+                    reply = handle_message(msg)
+                except Exception as exc:        # 单条指令出错不该把连接打断
+                    log(f"指令出错 {msg.get('t')}: {type(exc).__name__}: {exc}")
+                    continue
                 if reply is not None:
                     ws_send(sock, json.dumps(reply, separators=(",", ":")))
-        except (ConnectionError, OSError, ValueError):
-            pass
+        except (ConnectionError, OSError, ValueError) as exc:
+            log(f"断开原因: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            log(f"断开异常: {type(exc).__name__}: {exc}")
         finally:
             log(f"平板已断开: {peer}")
 

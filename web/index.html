@@ -803,11 +803,11 @@
       </div>
     </div>
     <div class="isle-bottom">
-      <button class="islemode" id="modeShuffle" aria-label="随机播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3.2l7.6 10H20M4 17h3.2l7.6-10H20"/><path d="M17.2 4.4 20 7l-2.8 2.6"/><path d="M17.2 14.4 20 17l-2.8 2.6"/></svg></button>
+      <button class="islemode unsupported" id="modeShuffle" aria-label="随机播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3.2l7.6 10H20M4 17h3.2l7.6-10H20"/><path d="M17.2 4.4 20 7l-2.8 2.6"/><path d="M17.2 14.4 20 17l-2.8 2.6"/></svg></button>
       <button class="islectl" data-media="177" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6.2 9.4 12 19 17.8z" fill="currentColor"/></svg></button>
       <button class="isle-play-big" data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
       <button class="islectl" data-media="176" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 6.2 14.6 12 5 17.8z" fill="currentColor"/></svg></button>
-      <button class="islemode" id="modeRepeat" aria-label="循环播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 8.5h11a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z"/><path d="M8.5 6.2 6.3 8.5l2.2 2.3"/><path d="M15.5 15.8l2.2-2.2-2.2-2.3"/></svg></button>
+      <button class="islemode unsupported" id="modeRepeat" aria-label="循环播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 8.5h11a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z"/><path d="M8.5 6.2 6.3 8.5l2.2 2.3"/><path d="M15.5 15.8l2.2-2.2-2.2-2.3"/></svg></button>
       <button class="islectl" id="plBtn" aria-label="歌单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="18.5" cy="15.5" r="2.2"/><path d="M20.7 15.5V8.4l-4 1"/></svg></button>
     </div>
   </div>
@@ -1871,6 +1871,7 @@
   }
 
   function pressKey(vk, btn) {
+    if (!Number.isFinite(vk)) return;      // 别把 NaN 发出去，服务端会当 null 处理
     if (vk === 0) {                        // Fn 在真实键盘上是硬件层，发出去没有意义
       flash('Fn 键无对应功能');
       return;
@@ -2231,7 +2232,9 @@
   // 顶部与两侧都走点击；触控板由 attachPadArea 处理
   trmode.addEventListener('click', (e) => {
     const b = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
-    if (b && b.dataset.vk !== undefined) pressKey(parseInt(b.dataset.vk, 10), b);
+    if (!b || b.dataset.vk === undefined) return;
+    const vk = parseInt(b.dataset.vk, 10);
+    if (Number.isFinite(vk)) pressKey(vk, b);
   });
 
   document.getElementById('trClose').addEventListener('click', () => showMode('pad'));
