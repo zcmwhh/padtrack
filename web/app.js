@@ -347,16 +347,19 @@
       if (lyricLines[i][0] <= t) idx = i;
       else break;
     }
-    if (idx === lyricActive && !force) return;
+    if (idx === lyricActive && !force && lyricInner.style.transform) return;
     lyricActive = idx;
 
     // 左侧滚动栏
     const items = lyricInner.children;
     for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
-    if (idx >= 0 && items[idx]) {
+    // 还没到第一句（歌刚开始 / 暂停着）时，先把第一句居中，
+    // 否则列表会贴在容器顶部，看起来像"没对齐"，而且要等到第一句才动。
+    const i = idx >= 0 ? idx : 0;
+    if (items[i]) {
       const h = lyricsEl.clientHeight;
       const lh = items[0].offsetHeight || 33;
-      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (idx * lh + lh / 2))}px)`;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (i * lh + lh / 2))}px)`;
     }
   }
 

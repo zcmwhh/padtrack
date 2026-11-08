@@ -640,8 +640,20 @@ def split_song_title(raw):
     return t.strip(), ""
 
 
+# 歌词开头的制作人员信息：必须"关键词 + 冒号"才算，正常歌词不会这样开头
+_META_LINE = re.compile(
+    r"^\s*(制作人|作词|作曲|编曲|混音|母带|录音|监制|监製|和声|配唱|制作|出品|发行|策划|统筹"
+    r"|吉他|贝斯|鼓|键盘|弦乐|人声|调声|调校|原唱|翻唱"
+    r"|作詞|編曲|ミックス|マスタリング|レコーディング|プロデュース|アレンジ"
+    r"|lyrics?|composed?|composer|arranged?|arranger|produced?|producer"
+    r"|mixed?|mastered?|written|music)"
+    r"\s*(by)?\s*[:：]",
+    re.I,
+)
+
+
 def parse_lrc(text):
-    """把 LRC 文本解析成 [[秒, 歌词], ...]。"""
+    """把 LRC 文本解析成 [[秒, 歌词], ...]（去掉制作人员信息）。"""
     out = []
     for raw in (text or "").splitlines():
         line = raw.strip()
@@ -652,6 +664,8 @@ def parse_lrc(text):
             continue
         mm, ss, words = m.group(1), m.group(2).replace(":", "."), m.group(3).strip()
         if not words:
+            continue
+        if _META_LINE.match(words):
             continue
         try:
             sec = int(mm) * 60 + float(ss)
