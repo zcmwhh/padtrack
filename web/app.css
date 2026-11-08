@@ -565,6 +565,7 @@
   }
   #lyricCredits.on { opacity: .78; }
   #lyricInner {
+    position: relative;      /* 让子元素 offsetTop 相对它计算 */
     width: 100%; text-align: center;
     transition: transform .8s var(--ease-out);
     will-change: transform;

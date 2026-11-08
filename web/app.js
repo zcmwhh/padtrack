@@ -359,11 +359,14 @@
     for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
     // 还没到第一句（歌刚开始 / 暂停着）时，先把第一句居中，
     // 否则列表会贴在容器顶部，看起来像"没对齐"，而且要等到第一句才动。
-    const i = idx >= 0 ? idx : 0;
-    if (items[i]) {
+    //
+    // 位置要用目标行**真实的** offsetTop：歌词有长句折行时每行高度不一样，
+    // 按「行号 × 首行高度」算会越算越偏（开头看不出来，唱到后面就漂走了）。
+    const target = idx >= 0 ? items[idx] : items[0];
+    if (target) {
       const h = lyricsEl.clientHeight;
-      const lh = items[0].offsetHeight || 33;
-      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (i * lh + lh / 2))}px)`;
+      const y = target.offsetTop + target.offsetHeight / 2;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - y)}px)`;
     }
   }
 
