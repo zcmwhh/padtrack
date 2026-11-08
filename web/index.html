@@ -600,6 +600,7 @@
 
 <div id="numpad"></div>
 <div id="lyrics"><div id="lyricInner"></div></div>
+<div id="syncbox" style="display:none;position:fixed;left:8px;bottom:8px;z-index:999;font:12px/1.5 ui-monospace,monospace;color:#8fe3bd;background:rgba(0,0,0,.72);padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre"></div>
 
 <div class="topbar">
   <button class="round" id="numBtn" title="数字键盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.6" y="3.2" width="16.8" height="17.6" rx="3.4"/><path d="M9 8h.01M12 8h.01M15 8h.01M9 12h.01M12 12h.01M15 12h.01M9 16h6"/></svg></button>
@@ -619,6 +620,7 @@
     <span>歌词同步</span>
     <button class="mini" id="lyrBack">−5 秒</button>
     <button class="mini" id="lyrFwd">+5 秒</button>
+    <button class="mini" id="lyrReset">清零</button>
   </div>
   <div class="tip" id="buildLine" style="opacity:.6"></div>
   <div class="tip">
@@ -869,6 +871,7 @@
   const lyricInner = document.getElementById('lyricInner');
 
   let lastMedia = '';
+  let changeAt = 0;      // 发现切歌的时刻，用来补上抓取封面歌词那段时间
   let lyricOffset = parseFloat(localStorage.getItem('padtrackLyricOffset') || '0') || 0;
   let lyricLines = [], lyricBase = 0, lyricClock = 0;
   let lyricPlaying = false, lyricActive = -1, lyricSongKey = '';
@@ -921,9 +924,10 @@
     paintLyric(true);
   }
 
-  async function pollMedia() {
+  async function pollMedia(force) {
     try {
-      const r = await fetch(`/media?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const r = await fetch(`/media?k=${encodeURIComponent(KEY)}` + (force ? '&bust=1' : ''),
+        { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();
       const key = (d.title || '') + '|' + (d.artist || '') + '|' + (d.status || '') + '|' + (d.cover || '');
@@ -982,6 +986,10 @@
           const late = nowMs - predictedEnd;
           if (late > -3000 && late < 25000) base = Math.max(0, late / 1000);
         }
+        // 没有上一首可推算时（手动点播/跳过），至少把「从发现到拿到歌词」这段补上
+        if (typeof d.pos !== 'number' && changeAt) {
+          base = Math.max(base, (nowMs - changeAt) / 1000);
+        }
         lyricSongKey = songKey;
         lyricPlaying = !paused;
         setLyrics(d.lyric, base);
@@ -1024,7 +1032,7 @@
       if (!r.ok) return;
       const d = await r.json();
       const k = (d.title || '') + '|' + (d.status || '');
-      if (k !== nowKey) { nowKey = k; lastMedia = ''; pollMedia(); }
+      if (k !== nowKey) { nowKey = k; lastMedia = ''; changeAt = performance.now(); pollMedia(true); }
     } catch (_) {}
   }
   setInterval(pollNow, 1000);
@@ -1042,6 +1050,23 @@
     musicProg.style.width = (p * 100).toFixed(1) + '%';
   }
   setInterval(() => { paintLyric(false); paintProgress(); }, 220);
+
+  // ?debug=1 时显示同步诊断：paused 时 t 应该停住
+  const syncbox = document.getElementById('syncbox');
+  const DEBUG_SYNC = new URLSearchParams(location.search).get('debug') === '1';
+  if (DEBUG_SYNC) syncbox.style.display = 'block';
+  setInterval(() => {
+    if (!DEBUG_SYNC) return;
+    const t = lyricTime();
+    const cur = lyricActive >= 0 && lyricLines[lyricActive] ? lyricLines[lyricActive] : null;
+    syncbox.textContent =
+      't=' + t.toFixed(1) + 's  line#' + lyricActive +
+      (cur ? ' @' + cur[0].toFixed(1) : '') +
+      '\noffset=' + lyricOffset + '  dur=' + (songDur ? songDur.toFixed(1) : '-') +
+      '\nstatus=' + (lyricPlaying ? 'playing' : 'paused') +
+      '  lines=' + lyricLines.length +
+      '\n' + (lyricSongKey || '-');
+  }, 250);
 
   // 手动微调歌词进度：打开页面时歌已经在播一半，就靠这个对齐
   function nudgeLyric(sec) {
@@ -1063,6 +1088,11 @@
   }
   document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
   document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
+  document.getElementById('lyrReset').addEventListener('click', () => {
+    lyricOffset = 0;
+    localStorage.setItem('padtrackLyricOffset', '0');
+    flash('歌词偏移已清零');
+  });
 
   pad.addEventListener('pointerdown', (e) => {
     if (!connected) return;

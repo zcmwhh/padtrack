@@ -576,7 +576,7 @@ _now_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": "none"}}
 def query_now():
     """只回答「现在放的是哪首、在不在放」，不碰网络，够快。"""
     now = time.time()
-    if now - _now_cache["t"] < 0.7:
+    if now - _now_cache["t"] < 0.4:
         return _now_cache["data"]
 
     data = {"title": "", "artist": "", "status": "none"}
@@ -596,14 +596,14 @@ def query_now():
     return data
 
 
-def query_media():
-    """当前播放曲目，带 2.5 秒缓存。"""
-    if time.time() - _media_cache["t"] < 2.5:
+def query_media(force=False):
+    """当前播放曲目，带 2.5 秒缓存；force=True 时跳过缓存（切歌瞬间用）。"""
+    if not force and time.time() - _media_cache["t"] < 2.5:
         return _media_cache["data"]
 
     data = {"title": "", "artist": "", "status": ""}
     with _media_lock:
-        if time.time() - _media_cache["t"] < 2.5:
+        if not force and time.time() - _media_cache["t"] < 2.5:
             return _media_cache["data"]
 
         # 1) 先看本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放
@@ -710,7 +710,8 @@ class Handler(socketserver.BaseRequestHandler):
                 if key != KEY:
                     self._http(sock, 403, b"{}", "application/json")
                     return
-                body = json.dumps(query_media(), ensure_ascii=False).encode("utf-8")
+                force = params.get("bust", [""])[0] == "1"
+                body = json.dumps(query_media(force), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
