@@ -520,7 +520,7 @@ def parse_lrc(text):
 
 def netease_meta(title, artist):
     """按歌名+歌手取封面和歌词。返回 {"cover": bytes, "lyric": [[秒, 词], ...]}。"""
-    result = {"cover": b"", "lyric": []}
+    result = {"cover": b"", "lyric": [], "dur": 0}
     if not title:
         return result
     hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/"}
@@ -556,6 +556,10 @@ def netease_meta(title, artist):
                 f"https://music.163.com/api/song/detail/?id={sid}&ids=%5B{sid}%5D"
             ).decode("utf-8", "replace"))
             dsongs = d2.get("songs") or []
+            if dsongs:
+                dur_ms = dsongs[0].get("duration") or 0
+                if dur_ms:
+                    result["dur"] = round(float(dur_ms) / 1000.0, 1)
             pic = ((dsongs[0].get("album") or {}).get("picUrl") if dsongs else "") or ""
             if pic:
                 result["cover"] = fetch(pic.split("?")[0] + "?param=200y200", timeout=6)
@@ -619,6 +623,8 @@ def query_media():
                 data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
             if meta.get("lyric"):
                 data["lyric"] = meta["lyric"]
+            if meta.get("dur"):
+                data["dur"] = meta["dur"]
 
         _media_cache["t"] = time.time()
         _media_cache["data"] = data
