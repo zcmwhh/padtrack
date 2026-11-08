@@ -175,6 +175,9 @@
 
   /* F / J 键位横杆：和实体键盘的定位凸起一样，盲打时手指有参照 */
   .kbkey { position: relative; }
+  /* F 键分组的间隔，以及行尾的占位块 */
+  .kbkey.gap { margin-left: 10px; }
+  .kbkey.ghost { visibility: hidden; pointer-events: none; }
   .kbkey.home::after {
     content: ''; position: absolute; left: 50%; bottom: 6px;
     width: 12px; height: 2px; border-radius: 2px;
@@ -818,11 +821,11 @@
   // 完整 104 键布局：和电脑键盘一一对应，哪根手指按哪个键不用重新记
   const LAYER_MAIN = [
     { h: 0.78, keys: [
-      K('ESC',0x1B,1.2,'fn'),
-      K('F1',0x70),K('F2',0x71),K('F3',0x72),K('F4',0x73),
-      K('F5',0x74),K('F6',0x75),K('F7',0x76),K('F8',0x77),
-      K('F9',0x78),K('F10',0x79),K('F11',0x7A),K('F12',0x7B),
-      K('打印',0x2C,1.05,'fn'),K('卷轴',0x91,1.05,'fn'),K('停顿',0x13,1.05,'fn'),
+      K('Esc',0x1B,1.2,'fn'),
+      K('F1',0x70,1,'fn gap'),K('F2',0x71,1,'fn'),K('F3',0x72,1,'fn'),K('F4',0x73,1,'fn'),
+      K('F5',0x74,1,'fn gap'),K('F6',0x75,1,'fn'),K('F7',0x76,1,'fn'),K('F8',0x77,1,'fn'),
+      K('F9',0x78,1,'fn gap'),K('F10',0x79,1,'fn'),K('F11',0x7A,1,'fn'),K('F12',0x7B,1,'fn'),
+      K('',0,1.6,'ghost'),
     ] },
     { keys: [
       K('`~',0xC0),K('1!',0x31),K('2@',0x32),K('3#',0x33),K('4$',0x34),
@@ -830,27 +833,27 @@
       K('0)',0x30),K('-_',0xBD),K('=+',0xBB),K('退格',0x08,2.2,'fn'),
     ] },
     { keys: [
-      K('标签页',0x09,1.6,'fn'),
+      K('Tab',0x09,1.6,'fn'),
       K('Q',0x51),K('W',0x57),K('E',0x45),K('R',0x52),K('T',0x54),
       K('Y',0x59),K('U',0x55),K('I',0x49),K('O',0x4F),K('P',0x50),
       K('[{',0xDB),K(']}',0xDD),K('\\|',0xDC,1.45),
     ] },
     { keys: [
-      K('帽',0x14,1.85,'fn'),
+      K('Caps',0x14,1.85,'fn'),
       K('A',0x41),K('S',0x53),K('D',0x44),K('F',0x46,1,'home'),K('G',0x47),
       K('H',0x48),K('J',0x4A,1,'home'),K('K',0x4B),K('L',0x4C),
-      K(';:',0xBA),K('"\'',0xDE),K('进来',0x0D,2.3,'fn'),
+      K(';:',0xBA),K('"\'',0xDE),K('回车',0x0D,2.3,'fn'),
     ] },
     { keys: [
-      K('换班',0x10,2.35,'mod'),
+      K('Shift',0x10,2.35,'mod'),
       K('Z',0x5A),K('X',0x58),K('C',0x43),K('V',0x56),K('B',0x42),
       K('N',0x4E),K('M',0x4D),K(',<',0xBC),K('.>',0xBE),K('/?',0xBF),
-      K('换班',0x10,2.35,'mod'),K('↑',0x26,1,'fn'),
+      K('Shift',0x10,2.35,'mod'),K('↑',0x26,1,'fn'),
     ] },
     { keys: [
-      K('Ctrl',0x11,1.35,'mod'),K('胜利',0x5B,1.05,'mod'),K('替代',0x12,1.05,'mod'),
-      K('空间',0x20,6.6,'space'),
-      K('替代',0x12,1.05,'mod'),K('注',0x15,1.05,'fn'),K('菜单',0x5D,1.05,'fn'),
+      K('Ctrl',0x11,1.35,'mod'),K('Win',0x5B,1.05,'mod'),K('Alt',0x12,1.05,'mod'),
+      K('空格',0x20,6.6,'space'),
+      K('Alt',0x12,1.05,'mod'),K('Fn',0,1.05,'fn'),K('菜单',0x5D,1.05,'fn'),
       K('Ctrl',0x11,1.35,'mod'),
       K('←',0x25,1,'fn'),K('↓',0x28,1,'fn'),K('→',0x27,1,'fn'),
     ] },
@@ -865,6 +868,10 @@
   }
 
   function pressKey(vk, btn) {
+    if (vk === 0) {                        // Fn 在真实键盘上是硬件层，发出去没有意义
+      flash('Fn 键无对应功能');
+      return;
+    }
     const modName = MOD_NAME[vk];
     if (modName) {                         // 修饰键：点一下点亮，再点取消
       const idx = stickyMods.indexOf(modName);

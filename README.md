@@ -89,17 +89,18 @@ http://192.168.1.10:8765/?k=4821&mode=surround   # 环绕
 抽屉 / 全屏 / 分屏三种形态使用**完整 104 键布局**，和电脑键盘一一对应：
 
 ```
-ESC  F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12   打印 卷轴 停顿
-`~   1! 2@ 3# 4$ 5% 6^ 7& 8* 9( 0) -_ =+             退格
-标签页  Q W E R T Y U I O P  [{ ]} \|
-帽  A S D F G H J K L  ;: '"                         进来
-换班  Z X C V B N M ,< .> /?              换班   ↑
-Ctrl 胜利 替代 [    空间    ] 替代 注 菜单 Ctrl ← ↓ →
+Esc  F1 F2 F3 F4  F5 F6 F7 F8  F9 F10 F11 F12
+`~   1! 2@ 3# 4$ 5% 6^ 7& 8* 9( 0) -_ =+        退格
+Tab  Q W E R T Y U I O P  [{ ]} \|
+Caps  A S D F G H J K L  ;: '"                  回车
+Shift  Z X C V B N M ,< .> /?            Shift   ↑
+Ctrl  Win  Alt  [    空格    ]  Alt  Fn  菜单  Ctrl ← ↓ →
 ```
 
 - **F 和 J 键下方有横杆**（和实体键盘的定位凸起一样），盲打时手指有参照点；
-- 键名沿用中文键位叫法：标签页 = Tab、帽 = CapsLock、进来 = Enter、换班 = Shift、空间 = 空格、胜利 = Win、替代 = Alt；
-- 换班 / 替代 / 胜利 / Ctrl 是「点一下点亮、再点取消」的临时修饰键。
+- 键名用标准叫法：退格 = Backspace、回车 = Enter、空格 = Space、菜单 = Menu，其余保持 Tab / Caps / Shift / Ctrl / Alt / Win / Fn；
+- Shift / Ctrl / Alt / Win 是「点一下点亮、再点取消」的临时修饰键；
+- F 键按 F1-F4 / F5-F8 / F9-F12 分组，和实体键盘的分段一致；Fn 在触屏上没有对应功能，点了会提示。
 
 ### 全屏键盘的触控条
 
