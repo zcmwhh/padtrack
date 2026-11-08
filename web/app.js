@@ -113,9 +113,24 @@
     b.addEventListener('click', () => {
       if (b.dataset.media === '179') {           // 播放/暂停：先翻图标，别等轮询
         uiPaused = !uiPaused;
-        paintPlayIcon();
         iconLockUntil = performance.now() + 2500;
-        // 锁定结束后拉一次真实状态，按键没生效时把图标纠正回来
+        // 歌词进度立刻跟着停/走。如果等轮询（1 秒一次 + 服务端判定延迟），
+        // 暂停之后歌词还会往上滚一两行。
+        if (uiPaused) {
+          lyricBase = lyricTime();
+          lyricPlaying = false;
+          lyricClock = performance.now();
+          songAnchor = lyricClock - lyricBase * 1000;
+        } else {
+          lyricClock = performance.now();
+          lyricPlaying = true;
+        }
+        paintPlayIcon();
+        paintLyric(true);
+        paintProgress();
+        musicWave.classList.toggle('playing', !uiPaused);
+        // 600ms 先问一次（服务端识别大约 1 秒），2.6 秒再确认一次
+        setTimeout(() => { lastMedia = ''; pollMedia(true); }, 600);
         setTimeout(() => { lastMedia = ''; pollMedia(true); }, 2600);
       }
       send({ t: 'k', vk: parseInt(b.dataset.media, 10) });   // 系统媒体键
@@ -423,20 +438,25 @@
         }
       }
 
-      if (paused && lyricPlaying) {
-        lyricBase = lyricTime();
-        lyricPlaying = false;
-        songAnchor = lyricClock - lyricBase * 1000;
-      } else if (!paused && !lyricPlaying) {
-        lyricClock = nowMs;
-        lyricPlaying = true;
-      }
-      musicWave.classList.toggle('playing', !paused);
       mShuffle = typeof d.shuffle === 'boolean' ? d.shuffle : null;
       mRepeat = typeof d.repeat === 'number' ? d.repeat : null;
       paintModes();
-      uiPaused = paused;
-      if (performance.now() > iconLockUntil) paintPlayIcon();
+
+      // 刚点过按钮的那 2.5 秒内，以用户的操作意图为准：
+      // 否则服务端还没跟上（电平要静音 0.45 秒才判定）时会把状态覆盖回去，图标就会来回弹。
+      if (performance.now() > iconLockUntil) {
+        if (paused && lyricPlaying) {
+          lyricBase = lyricTime();
+          lyricPlaying = false;
+          songAnchor = lyricClock - lyricBase * 1000;
+        } else if (!paused && !lyricPlaying) {
+          lyricClock = nowMs;
+          lyricPlaying = true;
+        }
+        uiPaused = paused;
+        paintPlayIcon();
+      }
+      musicWave.classList.toggle('playing', !uiPaused);
     } catch (err) { console.error('pollMedia 出错:', err && err.message); }
   }
   pollMedia();

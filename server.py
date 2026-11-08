@@ -512,39 +512,84 @@ def player_window_title():
     return found[0][0], found[0][1]
 
 
-_com_ready = False
+# COM 是按线程的：ThreadingTCPServer 每个请求一个新线程，
+# 所以每个线程都得 CoInitialize 一次，不能做成"只做一次"。
+_com_local = threading.local()
+
+
+def _ensure_com():
+    if getattr(_com_local, "ready", False):
+        return
+    try:
+        import comtypes
+        comtypes.CoInitialize()
+    except Exception:
+        pass
+    _com_local.ready = True
+
+
+_peak_seen = {}            # exe -> 最后一次电平非零的时间
+_PEAK_SILENCE = 0.45        # 电平连续为 0 多久算暂停（躲开换气、间奏的静音）
+_PEAK_EPS = 0.0005
 
 
 def session_active(exe_name):
-    """这个进程的音频会话是否在出声。True=在放, False=静音/暂停, None=判断不了。"""
+    """这个进程现在是不是真的在出声。
+
+    True=在放, False=暂停/没声音, None=判断不了。
+
+    注意：网易云暂停后 AudioSession.State 依然是 1（Active），
+    必须看电平（IAudioMeterInformation.GetPeakValue）才能分辨。
+    """
     if not exe_name:
         return None
-    global _com_ready
-    if not _com_ready:
-        try:
-            import comtypes
-            comtypes.CoInitialize()
-        except Exception:
-            pass
-        _com_ready = True
+    _ensure_com()
     try:
-        from pycaw.pycaw import AudioUtilities
+        from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
     except Exception:
         return None
+
     seen = False
+    active = False
+    peak = None               # None = 拿不到电平
+
     try:
-        for s in AudioUtilities.GetAllSessions():
+        for sess in AudioUtilities.GetAllSessions():
             try:
-                proc = s.Process
-                if proc and proc.name().lower() == exe_name:
-                    seen = True
-                    if s.State == 1:
-                        return True
+                proc = sess.Process
+                if not proc or proc.name().lower() != exe_name:
+                    continue
+                seen = True
+                if sess.State != 1:         # 0=Inactive 2=Expired
+                    continue
+                active = True
+                try:
+                    meter = sess._ctl.QueryInterface(IAudioMeterInformation)
+                    val = float(meter.GetPeakValue())
+                    peak = val if peak is None else max(peak, val)
+                except Exception:
+                    pass
             except Exception:
                 continue
     except Exception:
         return None
-    return False if seen else None
+
+    if not seen:
+        return None
+    if not active:
+        _peak_seen.pop(exe_name, None)
+        return False
+    if peak is None:                    # 电平读不到，退回旧行为
+        return True
+
+    now = time.time()
+    if peak > _PEAK_EPS:
+        _peak_seen[exe_name] = now
+        return True
+    last = _peak_seen.get(exe_name, 0.0)
+    if now - last < _PEAK_SILENCE:
+        return True                     # 刚静下来，先当还在放
+    return False
 
 
 def split_song_title(raw):
@@ -638,7 +683,7 @@ _now_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": "none"}}
 def query_now():
     """只回答「现在放的是哪首、在不在放」，不碰网络，够快。"""
     now = time.time()
-    if now - _now_cache["t"] < 0.4:
+    if now - _now_cache["t"] < 0.25:
         return _now_cache["data"]
 
     data = {"title": "", "artist": "", "status": "none"}
