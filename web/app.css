@@ -489,6 +489,7 @@
   }
   #lyrics.on { opacity: 1; transform: none; }
   #lyricInner {
+    position: relative;      /* 让子元素 offsetTop 相对它算 */
     width: 100%; text-align: center;
     transition: transform .8s var(--ease-out);
     will-change: transform;
@@ -501,7 +502,9 @@
                 transform .65s var(--ease-spring);
   }
   .lyric-line.active {
-    color: #f2f8ff; opacity: 1; font-weight: 600; transform: scale(1.02);
+    /* 不要改 font-weight：加粗会让长句多折一行，整张列表重排，
+       高亮行就会越滚越偏 */
+    color: #f2f8ff; opacity: 1; transform: scale(1.02);
     filter: blur(0);
     text-shadow: 0 0 22px rgba(150, 200, 255, .5);
   }

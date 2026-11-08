@@ -355,8 +355,11 @@
     for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
     if (idx >= 0 && items[idx]) {
       const h = lyricsEl.clientHeight;
-      const lh = items[0].offsetHeight || 33;
-      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (idx * lh + lh / 2))}px)`;
+      // 用目标行的真实布局位置居中。歌词折行时每行高度不同，
+      // 按「行号 × 行高」算会越滚越偏（高亮行慢慢飘出屏幕）。
+      const line = items[idx];
+      const y = line.offsetTop + line.offsetHeight / 2;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - y)}px)`;
     }
   }
 
