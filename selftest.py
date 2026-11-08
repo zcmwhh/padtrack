@@ -121,7 +121,11 @@ def main():
     # 1. 页面
     code, body = http_get(f"{base}/?k={args.key}")
     check("页面返回 200", code == 200, f"HTTP {code}")
-    check("页面内容正确", "PadTrack" in body and "WebSocket" in body)
+    # 前端拆成 index.html + app.css + app.js 之后，页面里不再有 WebSocket 字样，
+    # 改成检查结构标记 + 外链资源是否可达
+    css_ok = "app.css" in body
+    js_ok = "app.js" in body
+    check("页面内容正确", "PadTrack" in body and css_ok and js_ok and 'id="pad"' in body)
 
     # 2. 错误的访问码
     code, _ = http_get(f"{base}/?k=0000x")

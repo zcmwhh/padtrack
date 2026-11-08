@@ -46,6 +46,7 @@ LOG_PATH = os.path.join(HERE, "padtrack.log")
 ADDR_PATH = os.path.join(HERE, "当前地址.txt")
 KEY_PATH = os.path.join(HERE, "key.txt")
 PID_PATH = os.path.join(HERE, "padtrack.pid")
+KEY = ""                      # 由 main() 用 resolve_key() 填
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 # ---------------------------------------------------------------- SendInput
@@ -340,6 +341,19 @@ def read_frame(reader):
 
 PAGE_PATH = os.path.join(WEB_DIR, "index.html")
 
+# 静态资源：样式、脚本、图片、字体。属于"前端资源"，不含访问码，不校验 k。
+STATIC_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+
 FORBIDDEN = """<!doctype html><meta charset="utf-8">
 <body style="background:#111;color:#ddd;font:16px/1.8 sans-serif;padding:40px">
 <h2>访问码不对</h2>
@@ -350,10 +364,10 @@ FORBIDDEN = """<!doctype html><meta charset="utf-8">
 
 # ---------------------------------------------------------------- 媒体信息
 # 走 Windows 系统媒体控制（GSMTC），取当前播放器的曲名/歌手/状态。
-MEDIA_PS = r"""
+PS_PRELUDE = r"""
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+$gen = ([WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
   $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
 })[0]
@@ -366,15 +380,38 @@ function Await($op, $t) {
 [void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 $s = $mgr.GetCurrentSession()
+"""
+
+# 三个脚本共用上面这段（GSMTC 的异步等待样板），下面只写各自的动作。
+MEDIA_PS = PS_PRELUDE + r"""
 if ($null -eq $s) {
   '{"title":"","artist":"","status":"none"}'
 } else {
   $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
   $i = $s.GetPlaybackInfo()
   $tl = $s.GetTimelineProperties()
-  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus; pos = [double]$tl.Position.TotalSeconds; dur = [double]$tl.EndTime.TotalSeconds; shuffle = [bool]$i.ShuffleEnabled; repeat = [int]$i.AutoRepeatMode } | ConvertTo-Json -Compress
+  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus;
+     pos = [double]$tl.Position.TotalSeconds; dur = [double]$tl.EndTime.TotalSeconds;
+     shuffle = [bool]$i.ShuffleEnabled; repeat = [int]$i.AutoRepeatMode } | ConvertTo-Json -Compress
 }
 """
+
+def _ps_script(text, name):
+    """把 PowerShell 脚本写到临时目录。
+
+    文件名带内容哈希：脚本一改就会写新文件，不会像以前那样
+    因为临时目录里留着旧版本而永远跑旧逻辑。
+    """
+    digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
+    path = os.path.join(tempfile.gettempdir(), f"padtrack_{name}_{digest}.ps1")
+    if not os.path.exists(path):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError:
+            return ""
+    return path
+
 
 _media_lock = threading.Lock()
 _media_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": ""}}
@@ -387,13 +424,32 @@ PLAYER_PROCS = (
 )
 
 
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = (
+    wintypes.HANDLE, wintypes.DWORD, ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD))
+kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+_EXE_CACHE = {}          # pid -> exe 名。EnumWindows 每秒扫几百个窗口，不缓存太浪费
+_EXE_CACHE_MAX = 256
+
+
 def _exe_name(pid):
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-    k32.OpenProcess.restype = wintypes.HANDLE
-    k32.QueryFullProcessImageNameW.argtypes = (
-        wintypes.HANDLE, wintypes.DWORD, ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD))
-    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    hit = _EXE_CACHE.get(pid)
+    if hit is not None:
+        return hit
+    name = _query_exe_name(pid)
+    if len(_EXE_CACHE) >= _EXE_CACHE_MAX:
+        _EXE_CACHE.clear()
+    _EXE_CACHE[pid] = name
+    return name
+
+
+def _query_exe_name(pid):
+    k32 = kernel32
     h = k32.OpenProcess(0x1000, False, pid)
     if not h:
         return ""
@@ -456,15 +512,21 @@ def player_window_title():
     return found[0][0], found[0][1]
 
 
+_com_ready = False
+
+
 def session_active(exe_name):
     """这个进程的音频会话是否在出声。True=在放, False=静音/暂停, None=判断不了。"""
     if not exe_name:
         return None
-    try:
-        import comtypes
-        comtypes.CoInitialize()
-    except Exception:
-        pass
+    global _com_ready
+    if not _com_ready:
+        try:
+            import comtypes
+            comtypes.CoInitialize()
+        except Exception:
+            pass
+        _com_ready = True
     try:
         from pycaw.pycaw import AudioUtilities
     except Exception:
@@ -596,22 +658,7 @@ def query_now():
     return data
 
 
-SEARCH_PS = r"""
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
-  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
-  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
-})[0]
-function Await($op, $t) {
-  $m = $gen.MakeGenericMethod($t)
-  $task = $m.Invoke($null, @($op))
-  $task.Wait(-1) | Out-Null
-  $task.Result
-}
-[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
-$s = $mgr.GetCurrentSession()
+SEARCH_PS = PS_PRELUDE + r"""
 if ($null -eq $s) { '{"ok":false,"reason":"no-session"}'; exit }
 $ticks = [long]([double]::Parse($args[0]) * 10000000)
 $ok = Await ($s.TryChangePlaybackPositionAsync($ticks)) ([bool])
@@ -619,22 +666,7 @@ $ok = Await ($s.TryChangePlaybackPositionAsync($ticks)) ([bool])
 """
 
 
-MODE_PS = r"""
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
-  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
-  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
-})[0]
-function Await($op, $t) {
-  $m = $gen.MakeGenericMethod($t)
-  $task = $m.Invoke($null, @($op))
-  $task.Wait(-1) | Out-Null
-  $task.Result
-}
-[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
-$s = $mgr.GetCurrentSession()
+MODE_PS = PS_PRELUDE + r"""
 if ($null -eq $s) { '{"ok":false,"reason":"no-session"}'; exit }
 $what = $args[0]
 try {
@@ -654,10 +686,9 @@ try {
 def set_play_mode(what, value):
     """切换随机/循环。只有支持系统媒体控制的播放器才能改。"""
     try:
-        script = os.path.join(tempfile.gettempdir(), "padtrack_mode.ps1")
-        if not os.path.exists(script):
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(MODE_PS)
+        script = _ps_script(MODE_PS, "mode")
+        if not script:
+            return {"ok": False, "reason": "script"}
         out = subprocess.run(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
              str(what), str(int(value))],
@@ -676,10 +707,9 @@ def set_play_mode(what, value):
 def seek_to(seconds):
     """把当前播放位置跳到指定秒数。只有支持系统媒体控制的播放器才行。"""
     try:
-        script = os.path.join(tempfile.gettempdir(), "padtrack_seek.ps1")
-        if not os.path.exists(script):
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(SEARCH_PS)
+        script = _ps_script(SEARCH_PS, "seek")
+        if not script:
+            return {"ok": False, "reason": "script"}
         out = subprocess.run(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
              str(float(seconds))],
@@ -789,33 +819,48 @@ def netease_playlist_tracks(pid, limit=120):
         return []
 
 
-def query_media(force=False):
-    """当前播放曲目，带 2.5 秒缓存；force=True 时跳过缓存（切歌瞬间用）。"""
-    if not force and time.time() - _media_cache["t"] < 2.5:
-        return _media_cache["data"]
+_META_RETRY = 60.0        # 抓失败后多久重试
 
+
+def _meta_for(key, title, artist):
+    """封面 + 歌词。命中缓存直接用；抓失败的结果只留 60 秒，网络好了能自愈。"""
+    now = time.time()
+    hit = _cover_cache.get(key)
+    if hit is not None and (not hit.get("_neg") or now - hit.get("_t", 0) < _META_RETRY):
+        return hit
+
+    meta = dict(netease_meta(title, artist) or {})
+    meta["_t"] = now
+    meta["_neg"] = not (meta.get("cover") or meta.get("lyric"))
+    if len(_cover_cache) >= _COVER_MAX:
+        # 淘汰最早那条，别整个清空——清空会让正在显示的封面 404 闪一下
+        try:
+            _cover_cache.pop(next(iter(_cover_cache)))
+        except (StopIteration, KeyError):
+            _cover_cache.clear()
+    _cover_cache[key] = meta
+    return meta
+
+
+def _probe_player():
+    """问一次「现在放的是哪首」。窗口优先，拿不到再问系统媒体控制。"""
     data = {"title": "", "artist": "", "status": ""}
-    with _media_lock:
-        if not force and time.time() - _media_cache["t"] < 2.5:
-            return _media_cache["data"]
 
-        # 1) 先看本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放
-        #    （网易云走这条，它不注册系统媒体控制）
-        raw, exe = player_window_title()
-        if raw:
-            t, a = split_song_title(raw)
-            if t:
-                playing = session_active(exe)
-                data = {"title": t, "artist": a,
-                        "status": "Paused" if playing is False else "Playing"}
+    # 1) 本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放
+    #    （网易云走这条，它不注册系统媒体控制）
+    raw, exe = player_window_title()
+    if raw:
+        t, a = split_song_title(raw)
+        if t:
+            playing = session_active(exe)
+            data = {"title": t, "artist": a,
+                    "status": "Paused" if playing is False else "Playing"}
 
-        # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
-        if not data.get("title"):
+    # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
+    if not data.get("title"):
+        script = _ps_script(MEDIA_PS, "media")
+        if script:
             try:
-                script = os.path.join(tempfile.gettempdir(), "padtrack_media.ps1")
-                if not os.path.exists(script):
-                    with open(script, "w", encoding="utf-8") as f:
-                        f.write(MEDIA_PS)
                 out = subprocess.run(
                     ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -828,29 +873,62 @@ def query_media(force=False):
                         break
             except Exception:
                 pass
+    return data
 
-        # 3) 封面 + 歌词
-        key = f"{data.get('title','')}|{data.get('artist','')}"
-        if data.get("title"):
-            if key not in _cover_cache:
-                meta = netease_meta(data.get("title", ""), data.get("artist", ""))
-                if len(_cover_cache) >= _COVER_MAX:
-                    _cover_cache.clear()
-                _cover_cache[key] = meta
-            meta = _cover_cache.get(key) or {"cover": b"", "lyric": []}
-            if meta.get("cover"):
-                data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
-            if meta.get("lyric"):
-                data["lyric"] = meta["lyric"]
-            if meta.get("dur"):
-                data["dur"] = meta["dur"]
 
+def query_media(force=False):
+    """当前播放曲目，带 2.5 秒缓存；force=True 时跳过缓存（切歌瞬间用）。"""
+    if not force and time.time() - _media_cache["t"] < 2.5:
+        return _media_cache["data"]
+
+    with _media_lock:
+        if not force and time.time() - _media_cache["t"] < 2.5:
+            return _media_cache["data"]
+        data = _probe_player()
+
+    # 抓封面和歌词可能要好几秒，放在锁外面，别把 /media 全部堵住
+    if data.get("title"):
+        key = f"{data.get('title', '')}|{data.get('artist', '')}"
+        meta = _meta_for(key, data.get("title", ""), data.get("artist", ""))
+        if meta.get("cover"):
+            data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+        if meta.get("lyric"):
+            data["lyric"] = meta["lyric"]
+        if meta.get("dur"):
+            data["dur"] = meta["dur"]
+
+    with _media_lock:
         _media_cache["t"] = time.time()
         _media_cache["data"] = data
-        return data
+    return data
 
 
 class Handler(socketserver.BaseRequestHandler):
+    # 访问码是 4 位数字，局域网里可能被穷举。同一 IP 连续失败 10 次封 60 秒。
+    _fails = {}
+    _fails_lock = threading.Lock()
+
+    @classmethod
+    def _key_ok(cls, key, ip):
+        now = time.time()
+        with cls._fails_lock:
+            rec = cls._fails.get(ip)
+            if rec and rec[2] > now:
+                return False
+            if rec and now - rec[1] > 60:
+                cls._fails.pop(ip, None)
+                rec = None
+            if key == KEY:
+                cls._fails.pop(ip, None)
+                return True
+            rec = cls._fails.setdefault(ip, [0, now, 0.0])
+            rec[0] += 1
+            if rec[0] >= 10:
+                rec[2] = now + 60
+                rec[0] = 0
+                rec[1] = now
+            return False
+
     def handle(self):
         sock = self.request
         try:
@@ -876,14 +954,14 @@ class Handler(socketserver.BaseRequestHandler):
             key = params.get("k", [""])[0]
 
             if path == "/ws" and headers.get("upgrade", "").lower() == "websocket":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, FORBIDDEN.encode())
                     return
                 self._websocket(sock, headers, rest)
                 return
 
             if method == "GET" and path in ("/", "/index.html"):
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, FORBIDDEN.encode())
                     return
                 try:
@@ -899,8 +977,12 @@ class Handler(socketserver.BaseRequestHandler):
                 self._http(sock, 204, b"")
                 return
 
+            if method == "GET" and os.path.splitext(path)[1].lower() in STATIC_TYPES:
+                self._static(sock, path, headers)
+                return
+
             if method == "GET" and path == "/media":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 force = params.get("bust", [""])[0] == "1"
@@ -909,7 +991,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/now":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
@@ -917,7 +999,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/playlists":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"[]", "application/json")
                     return
                 body = json.dumps(netease_playlists(), ensure_ascii=False).encode("utf-8")
@@ -925,7 +1007,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/playlist":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"[]", "application/json")
                     return
                 pid = params.get("id", [""])[0]
@@ -934,7 +1016,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/mode":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 what = params.get("what", [""])[0]
@@ -947,7 +1029,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/seek":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 try:
@@ -959,7 +1041,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return
 
             if method == "GET" and path == "/cover":
-                if key != KEY:
+                if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"", "text/plain")
                     return
                 want = params.get("h", [""])[0]
@@ -967,7 +1049,7 @@ class Handler(socketserver.BaseRequestHandler):
                     if hashlib.md5(k.encode("utf-8")).hexdigest()[:12] == want:
                         img = (meta or {}).get("cover") if isinstance(meta, dict) else meta
                         if not img:
-                            break
+                            continue
                         ctype = "image/png" if img[:4] == b"\x89PNG" else "image/jpeg"
                         self._http(sock, 200, img, ctype)
                         return
@@ -996,17 +1078,47 @@ class Handler(socketserver.BaseRequestHandler):
         head, _, rest = buf.partition(b"\r\n\r\n")
         return head, rest
 
+    def _static(self, sock, path, headers):
+        """发送 web 目录下的静态文件。
+
+        用 mtime+大小做 ETag：浏览器带上 If-None-Match 就回 304，
+        改完文件自动失效，不会像强缓存那样"改了看不到"。
+        """
+        name = os.path.basename(path)
+        full = os.path.normpath(os.path.join(WEB_DIR, name))
+        root = os.path.normpath(WEB_DIR)
+        if not full.startswith(root + os.sep) or not os.path.isfile(full):
+            self._http(sock, 404, b"not found")
+            return
+        ext = os.path.splitext(full)[1].lower()
+        ctype = STATIC_TYPES.get(ext, "application/octet-stream")
+        try:
+            st = os.stat(full)
+            with open(full, "rb") as f:
+                body = f.read()
+        except OSError:
+            self._http(sock, 404, b"not found")
+            return
+        etag = f'"{int(st.st_mtime):x}-{st.st_size:x}"'
+        if headers.get("if-none-match", "").strip() == etag:
+            self._http(sock, 304, b"", ctype, {"ETag": etag})
+            return
+        self._http(sock, 200, body, ctype, {"ETag": etag, "Cache-Control": "no-cache"})
+
     @staticmethod
-    def _http(sock, code, body, ctype="text/html; charset=utf-8"):
-        reason = {200: "OK", 204: "No Content", 403: "Forbidden",
+    def _http(sock, code, body, ctype="text/html; charset=utf-8", extra=None):
+        reason = {200: "OK", 204: "No Content", 304: "Not Modified", 403: "Forbidden",
                   404: "Not Found", 500: "Internal Server Error"}.get(code, "OK")
         head = (
             f"HTTP/1.1 {code} {reason}\r\n"
             f"Content-Type: {ctype}\r\n"
             f"Content-Length: {len(body)}\r\n"
             "Cache-Control: no-store\r\n"
-            "Connection: close\r\n\r\n"
+            "Connection: close\r\n"
         )
+        for key, val in (extra or {}).items():
+            head += f"{key}: {val}\r\n"
+        head += "\r\n"
         sock.sendall(head.encode() + body)
 
     def _websocket(self, sock, headers, rest):
@@ -1152,17 +1264,26 @@ def write_address(port, ips):
         pass
 
 
-def bind_server(bind_addr, port, tries=10):
-    """端口被占用时自动顺延，返回 (server, 实际端口)。"""
+def bind_server(bind_addr, port, tries=10, wait_first=4.0):
+    """绑定端口。默认端口先用几秒重试（躲开 TIME_WAIT），真占用了才顺延。
+
+    以前的实现一失败就换端口，脚本快速重启时会漂到 8766，
+    而平板收藏夹里存的是 8765，于是"明明启动了却连不上"。
+    """
     last_exc = None
-    for candidate in range(port, port + tries):
-        try:
-            return Server((bind_addr, candidate), Handler), candidate
-        except OSError as exc:
-            last_exc = exc
-            busy = getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048, 10013)
-            if not busy:
-                break
+    for idx, candidate in enumerate(range(port, port + tries)):
+        deadline = time.time() + (wait_first if idx == 0 else 0)
+        while True:
+            try:
+                return Server((bind_addr, candidate), Handler), candidate
+            except OSError as exc:
+                last_exc = exc
+                busy = getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048, 10013)
+                if not busy:
+                    raise
+                if time.time() >= deadline:
+                    break
+                time.sleep(0.35)
     raise last_exc if last_exc else OSError("bind failed")
 
 

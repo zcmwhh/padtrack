@@ -209,9 +209,29 @@ Num    /      *      -
 └──────────────┘   延迟回显    └──────────────────────────┘
 ```
 
-- 服务端约 700 行，`http.server` + 手写 WebSocket 帧解析，不依赖第三方库
-- 客户端是单文件 `web/index.html`，无框架、无构建步骤
+- 服务端 `server.py`：手写 HTTP + WebSocket 帧解析，不依赖第三方库
+- 客户端**无框架、无构建步骤**，拆成三个文件方便维护：
+  - `web/index.html` —— 只有结构（约 150 行）
+  - `web/app.css` —— 全部样式（约 740 行）
+  - `web/app.js` —— 全部交互（约 1540 行）
 - 输入注入走 `user32.SendInput`，滚轮按 1/8 格（15 单位）发送，兼顾连续性和跨程序一致性
+- 静态资源带 ETag，改了文件浏览器会自动重新拉，不会卡在旧缓存
+
+### 目录
+
+```
+server.py          服务端：HTTP + WebSocket + 输入注入 + 媒体/歌词/歌单
+web/
+  index.html       结构
+  app.css          样式
+  app.js           交互与手势
+key.txt            访问码
+padtrack.log       运行日志
+启动.bat / 停止.bat
+selftest.py        自检
+PadTrack.spec      PyInstaller 打包配置
+backup/            每次改动前的备份
+```
 
 ## 延迟优化
 
@@ -239,8 +259,11 @@ python selftest.py --key 1234
 
 ## 开发约定
 
-改动 `server.py` / `web/index.html` 前，先复制一份到 `backup/yyyyMMdd-HHmm/`（保留目录结构），
+改动 `server.py` / `web/*` 前，先复制一份到 `backup/yyyyMMdd-HHmm/`（保留目录结构），
 出问题直接覆盖回滚。
+
+改完前端只要让平板**刷新页面**即可；服务端会带 ETag 校验，新增的 `app.css` / `app.js`
+会自动重新加载（不需要清缓存）。改了 `server.py` 则需要重启服务。
 
 ## License
 
