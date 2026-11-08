@@ -1,0 +1,11 @@
+# Windows 批处理/脚本保持 CRLF，否则 .bat 里的 goto/label 可能失效
+*.bat   text eol=crlf
+*.vbs   text eol=crlf
+*.ps1   text eol=crlf
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf

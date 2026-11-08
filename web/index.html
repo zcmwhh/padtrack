@@ -1,0 +1,1191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>PadTrack 触控板</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0d1117; color: #e6edf3;
+    font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+  }
+  /* 触控区一律不可选中，避免安卓长按弹出「复制/全选」菜单 */
+  #pad, #pad * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-drag: none !important;
+  }
+  #pad ::selection { background: transparent; }
+  #pad {
+    position: fixed; inset: 0;
+    touch-action: none;
+    background:
+      radial-gradient(1400px 900px at 25% 15%, #17222e 0%, #0d1117 62%),
+      radial-gradient(900px 600px at 85% 90%, #131a24 0%, transparent 70%);
+  }
+  #hint {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    text-align: center; line-height: 2.1; font-size: 15px; color: #5d6b7a;
+    pointer-events: none; transition: opacity .6s ease; padding: 0 24px;
+  }
+  #hint b { color: #8fa3b8; font-weight: 600; }
+  #hud {
+    position: fixed; left: 16px; top: calc(14px + env(safe-area-inset-top));
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px;
+    background: rgba(22, 30, 40, .72); border: 1px solid rgba(120, 150, 180, .18);
+    font-size: 13px; color: #9fb0c2; backdrop-filter: blur(8px);
+    pointer-events: none;
+  }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: #d9534f; transition: background .3s; }
+  #dot.on { background: #3ecf8e; box-shadow: 0 0 8px rgba(62, 207, 142, .8); }
+
+  #tip {
+    position: fixed; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(8px);
+    padding: 8px 16px; border-radius: 999px;
+    background: rgba(62, 207, 142, .14); border: 1px solid rgba(62, 207, 142, .34);
+    color: #8fe3bd; font-size: 13px; white-space: nowrap;
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  #tip.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .topbar {
+    position: fixed; right: 16px; top: calc(14px + env(safe-area-inset-top));
+    display: flex; gap: 10px;
+  }
+  .round {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: rgba(22, 30, 40, .78); border: 1px solid rgba(120, 150, 180, .2);
+    color: #c7d5e3; font-size: 19px; display: grid; place-items: center;
+    backdrop-filter: blur(8px); cursor: pointer;
+  }
+  .round:active { background: rgba(45, 60, 78, .9); }
+  .round.on {
+    border-color: rgba(62, 207, 142, .65);
+    color: #3ecf8e;
+    box-shadow: 0 0 12px rgba(62, 207, 142, .35);
+  }
+
+  /* 设置面板 */
+  #panel {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -46%) scale(.96);
+    width: min(420px, calc(100vw - 40px));
+    background: rgba(19, 26, 34, .96);
+    border: 1px solid rgba(120, 150, 180, .22);
+    border-radius: 18px; padding: 20px 22px;
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  }
+  #panel.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  #panel h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; color: #dbe7f3; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 14px 0; font-size: 14px; color: #a9bacb; }
+  .row input[type=range] { width: 55%; accent-color: #3ecf8e; }
+  .row input[type=checkbox] { width: 20px; height: 20px; accent-color: #3ecf8e; }
+  .val { color: #3ecf8e; font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+  .tip { font-size: 12px; line-height: 1.7; color: #66788a; margin-top: 14px; border-top: 1px solid rgba(120,150,180,.14); padding-top: 12px; }
+
+  /* 键盘抽屉 */
+  #kb {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    transform: translateY(110%); transition: transform .22s ease;
+    background: rgba(17, 23, 30, .97);
+    border-top: 1px solid rgba(120, 150, 180, .2);
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    backdrop-filter: blur(10px);
+  }
+  #kb.open { transform: translateY(0); }
+  #ta {
+    width: 100%; min-height: 54px; max-height: 160px; resize: none;
+    background: #0b1016; color: #e6edf3;
+    border: 1px solid rgba(120, 150, 180, .28); border-radius: 12px;
+    padding: 10px 12px; font-size: 16px; line-height: 1.5;
+    -webkit-user-select: text; user-select: text;
+  }
+  #ta:focus { outline: none; border-color: rgba(62, 207, 142, .6); }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .keys button {
+    flex: 1 1 auto; min-width: 64px; padding: 10px 8px;
+    background: #1b242e; color: #c7d5e3; border: 1px solid rgba(120, 150, 180, .2);
+    border-radius: 10px; font-size: 13px; cursor: pointer;
+  }
+  .keys button:active { background: #2a3746; }
+  .keys .wide { flex: 2 1 120px; }
+
+  /* 网页自绘键盘 */
+  .kbhead {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px; font-size: 12px; color: #7d8fa1;
+  }
+  .kbhead span { flex: 1; }
+  .mini {
+    padding: 6px 12px; border-radius: 8px; font-size: 13px;
+    background: #1b242e; color: #c7d5e3; border: 1px solid rgba(120, 150, 180, .22);
+  }
+  #kbPad { display: flex; flex-direction: column; gap: 6px; }
+  .kbrow { display: flex; gap: 6px; }
+  .kbrow.indent1 { padding: 0 5%; }
+  .kbrow.indent2 { padding: 0 2.5%; }
+  .kbkey {
+    flex: 1 1 0; min-width: 0; height: 44px;
+    border-radius: 9px; font-size: 15px;
+    background: #1b242e; color: #c7d5e3;
+    border: 1px solid rgba(120, 150, 180, .2);
+    display: grid; place-items: center;
+    -webkit-user-select: none; user-select: none;
+  }
+  .kbkey:active { background: #2a3746; }
+  .kbkey.on {
+    background: rgba(62, 207, 142, .18);
+    border-color: rgba(62, 207, 142, .55);
+    color: #8fe3bd;
+  }
+  .kbkey.mod { flex: 1.35 1 0; font-size: 13px; color: #9fb0c2; }
+  .kbkey.space { flex: 4.2 1 0; }
+  .kbkey.fn { flex: 1.25 1 0; font-size: 13px; }
+  #kbRawBox { display: none; margin-top: 10px; }
+  #kbRawBox.open { display: block; }
+
+  /* 全屏键盘 + 触控板 */
+  #kbfull {
+    position: fixed; inset: 0; z-index: 60;
+    display: none; flex-direction: column;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #kbfull.open { display: flex; }
+  .kfbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #7d8fa1; }
+  .kfbar span { flex: 1; }
+  #kfPad { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  #kfPad .kbrow { flex: 1; gap: 8px; }
+  #kfPad .kbkey { height: auto; font-size: 19px; border-radius: 12px; }
+  #kfPad .kbkey.mod, #kfPad .kbkey.fn { font-size: 15px; }
+  .kbkey.hit { background: #2c4a3c !important; border-color: rgba(62, 207, 142, .5) !important; }
+
+  /* 分屏：键盘为主 + 小触控板 */
+  #splitmode {
+    position: fixed; inset: 0; z-index: 60;
+    display: none; flex-direction: column;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #splitmode.open { display: flex; }
+  .spbody { flex: 1; display: flex; gap: 10px; min-height: 0; }
+  #spKeys { flex: 3.4 1 0; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  #spPad {
+    flex: 1 1 0; min-width: 110px; border-radius: 16px;
+    background: radial-gradient(600px 400px at 50% 40%, #16212c 0%, #0e151d 70%);
+    border: 1px solid rgba(120, 150, 180, .22);
+    touch-action: none;
+  }
+  #spKeys .kbrow { flex: 1; gap: 7px; }
+  #spKeys .kbkey { height: auto; font-size: 17px; border-radius: 11px; }
+  #spKeys .kbkey.mod, #spKeys .kbkey.fn { font-size: 13px; }
+  @media (orientation: portrait) {
+    .spbody { flex-direction: column; }
+    #spKeys { flex: 3 1 0; }
+    #spPad { flex: 1 1 0; min-height: 90px; min-width: 0; }
+  }
+
+  /* 环绕：上方打字区 + 下方 3:2 触控板 + 两侧功能区 */
+  #trmode {
+    position: fixed; inset: 0; z-index: 60;
+    display: none; flex-direction: column;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #trmode.open { display: flex; }
+  #trTop { flex: 3 1 0; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  #trTop .kbrow { flex: 1; gap: 6px; }
+  #trTop .kbkey { height: auto; font-size: 17px; border-radius: 11px; }
+  #trTop .kbkey.mod, #trTop .kbkey.fn { font-size: 13px; }
+  #trBottom { flex: 2.1 1 0; display: flex; gap: 8px; min-height: 0; margin-top: 8px; }
+  .trfunc {
+    flex: 1 1 0; min-width: 92px;
+    display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 6px;
+  }
+  .trfunc .kbkey { height: auto; font-size: 12px; border-radius: 9px; }
+  #trPad {
+    flex: 0 0 auto; height: 100%; aspect-ratio: 3 / 2; max-width: 58%;
+    border-radius: 14px; touch-action: none;
+    background: radial-gradient(500px 340px at 50% 45%, #16212c 0%, #0e151d 70%);
+    border: 1px solid rgba(120, 150, 180, .22);
+  }
+  @media (orientation: portrait) {
+    #trTop { flex: 2.6 1 0; }
+    #trBottom { flex: 1.8 1 0; }
+    .trfunc { min-width: 74px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="pad">
+  <div id="hint">
+    <b>单指</b>移动 · <b>轻点</b>左键 · <b>双击后拖</b>或按住拖<br>
+    <b>双指</b>滚动 · <b>双指捏合</b>缩放 · <b>双指轻点</b>右键 · 右上角 <b>✋</b> 锁定拖动<br>
+    <b>三指</b>左右切换窗口 · 上滑任务视图 · 下滑显示桌面
+  </div>
+</div>
+
+<div id="hud"><span id="dot"></span><span id="lat">连接中…</span></div>
+<div id="tip"></div>
+
+<div class="topbar">
+  <button class="round" id="lockBtn" title="拖动锁定">✋</button>
+  <button class="round" id="kbBtn" title="键盘">⌨</button>
+  <button class="round" id="gear" title="设置">⚙</button>
+</div>
+
+<div id="panel">
+  <h3>触控板设置</h3>
+  <div class="row"><span>灵敏度</span><input type="range" id="sens" min="0.5" max="3.5" step="0.1"><span class="val" id="sensVal">1.5</span></div>
+  <div class="row"><span>滚轮速度</span><input type="range" id="speed" min="0.4" max="3" step="0.1"><span class="val" id="speedVal">1.0</span></div>
+  <div class="row"><span>指针加速</span><input type="checkbox" id="accel"></div>
+  <div class="row"><span>自然滚动（手指推内容）</span><input type="checkbox" id="natural"></div>
+  <div class="row"><span>线性绝对定位</span><input type="checkbox" id="absmode"></div>
+  <div class="row"><span>全屏</span><button class="round" id="full" style="width:40px;height:40px;font-size:15px">⛶</button></div>
+  <div class="tip">
+    线性绝对定位会绕开 Windows 指针加速，1:1 跟手，适合精细操作；
+    玩 FPS 之类的游戏时关掉它，用默认的相对模式更兼容。<br>
+    滚动方向和原生触控板不一致时，切换上面的「自然滚动」即可。
+  </div>
+</div>
+
+<div id="kb">
+  <div class="kbhead">
+    <span id="kbTitle">走电脑输入法 · 拼音候选会出现在电脑屏幕上</span>
+    <button class="mini" id="spBtn">分屏</button>
+    <button class="mini" id="trBtn">环绕</button>
+    <button class="mini" id="kfBtn">全屏</button>
+    <button class="mini" id="kbRawBtn">直接输入</button>
+    <button class="mini" id="kbCloseBtn">收起</button>
+  </div>
+  <div id="kbPad"></div>
+  <div id="kbRawBox">
+    <textarea id="ta" rows="1" placeholder="直接发送文字，不走电脑输入法（适合粘贴长文本）" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+    <div class="keys">
+      <button class="wide" id="clearTa">清空输入框</button>
+    </div>
+  </div>
+</div>
+
+<div id="kbfull">
+  <div class="kfbar">
+    <span>轻点按键 · 单指滑动移光标 · 双指滑动滚动</span>
+    <button class="mini" id="kfClose">退出</button>
+  </div>
+  <div id="kfPad"></div>
+</div>
+
+<div id="splitmode">
+  <div class="kfbar">
+    <span>分屏：键盘为主，右侧小触控板</span>
+    <button class="mini" id="spClose">退出</button>
+  </div>
+  <div class="spbody">
+    <div id="spKeys"></div>
+    <div id="spPad"></div>
+  </div>
+</div>
+
+<div id="trmode">
+  <div class="kfbar">
+    <span>环绕：上方打字区，下方 3:2 触控板，两侧功能区</span>
+    <button class="mini" id="trClose">退出</button>
+  </div>
+  <div id="trTop"></div>
+  <div id="trBottom">
+    <div class="trfunc" id="trLeft"></div>
+    <div id="trPad"></div>
+    <div class="trfunc" id="trRight"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const KEY = new URLSearchParams(location.search).get('k') || '';
+  const pad = document.getElementById('pad');
+  const hint = document.getElementById('hint');
+  const dot = document.getElementById('dot');
+  const latEl = document.getElementById('lat');
+  const panel = document.getElementById('panel');
+  const kb = document.getElementById('kb');
+  const ta = document.getElementById('ta');
+
+  /* ---------------- 连接 ---------------- */
+  const S = Object.assign(
+    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0 },
+    JSON.parse(localStorage.getItem('padtrack') || '{}')
+  );
+  const saveS = () => localStorage.setItem('padtrack', JSON.stringify(S));
+
+  let ws = null, connected = false, tries = 0;
+  const rtts = [];
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws?k=${encodeURIComponent(KEY)}`);
+    ws.onopen = () => {
+      connected = true; tries = 0;
+      dot.classList.add('on');
+      latEl.textContent = '-- ms';
+      ping();
+      send({ t: 'cfg', abs: S.abs });
+    };
+    ws.onclose = () => {
+      connected = false;
+      dot.classList.remove('on');
+      latEl.textContent = '已断开，重连中…';
+      setTimeout(connect, Math.min(800 * Math.pow(1.7, tries++), 8000));
+    };
+    ws.onerror = () => {};
+    ws.onmessage = (ev) => {
+      let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+      if (d.t === 'pong') {
+        const rtt = Math.round(performance.now() - d.ts);
+        rtts.push(rtt);
+        if (rtts.length > 12) rtts.shift();
+        const avg = Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length);
+        const peak = Math.max.apply(null, rtts);
+        // 峰值明显高于平均 = 网络在抖，不是滚轮粒度的问题
+        latEl.textContent = peak > avg + 18 ? `${avg} ms · 峰值 ${peak}` : `${avg} ms`;
+      }
+    };
+  }
+
+  function send(o) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+  }
+
+  function ping() { send({ t: 'ping', ts: performance.now() }); }
+  setInterval(() => { if (connected) ping(); }, 2000);
+  connect();
+
+  /* ---------------- 手势状态 ---------------- */
+  const pts = new Map();
+  let mode = 'idle';          // idle | pending | move | drag | scroll2 | swipe3
+  let sx = 0, sy = 0, st = 0;
+  let lastCX = 0, lastCY = 0;
+  let lpTimer = 0;
+  let accX = 0, accY = 0, remX = 0, remY = 0;
+  let wheelX = 0, wheelY = 0, remWX = 0, remWY = 0;
+  let twoStartT = 0, twoMoved = 0;
+  let threeStart = null, sw3dx = 0, sw3dy = 0;
+  let pinch = false, d0 = 0, lastDist = 0, zoomAcc = 0, remZoom = 0;
+  let pinchRef = null;
+  let velY = 0, inertia = 0, lastTapEnd = 0;
+
+  // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
+  const kfPts = new Map();
+  let kfMode = 'idle', kfTapEl = null, kfStartT = 0, kfMoved = 0;
+  let kfSX = 0, kfSY = 0, kfLastX = 0, kfLastY = 0;
+  let kfAccX = 0, kfAccY = 0, kfRemX = 0, kfRemY = 0;
+  let kfScroll = 0, kfScrollRem = 0;
+
+  const centX = () => { let s = 0; for (const p of pts.values()) s += p.x; return pts.size ? s / pts.size : 0; };
+  const centY = () => { let s = 0; for (const p of pts.values()) s += p.y; return pts.size ? s / pts.size : 0; };
+  const PX_PER_NOTCH = 60;      // 手指移动 60px 算一格滚轮
+  const WHEEL_NOTCH = 120;      // Windows 的一格
+  const STEPS_PER_NOTCH = 8;    // 一格再切成 8 份，滚起来才连续
+  const WHEEL_STEP = WHEEL_NOTCH / STEPS_PER_NOTCH;
+  const click = (b) => send({ t: 'c', b });
+  const down = (b) => send({ t: 'd', b });
+  const up = (b) => send({ t: 'u', b });
+  // 拖动锁定期间不要重复按下/松开左键，否则会把锁定状态冲掉
+  const pressLeft = () => { if (!lockOn) down('l'); };
+  const releaseLeft = () => { if (!lockOn) up('l'); };
+
+  const tipEl = document.getElementById('tip');
+  let tipTimer = 0;
+  function flash(text) {
+    tipEl.textContent = text;
+    tipEl.classList.add('on');
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => tipEl.classList.remove('on'), 900);
+  }
+
+  pad.addEventListener('pointerdown', (e) => {
+    if (!connected) return;
+    try { pad.setPointerCapture(e.pointerId); } catch (_) {}
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    hint.style.opacity = '0';
+
+    inertia = 0; velY = 0;
+
+    if (pts.size === 1) {
+      lastCX = e.clientX; lastCY = e.clientY;
+      if (performance.now() - lastTapEnd < 500 && !lockOn) {
+        // 双击的第二下：先不按左键，等手指一动才发 dblstart。
+        // dblstart 会先挪 8px 再按下，破坏双击的位置容差，
+        // 所以拖的时候标题栏不会被判成双击最大化；
+        // 而不移动直接松开，仍然是正常的第二次单击（双击最大化照常）。
+        mode = 'armed';
+        lastTapEnd = 0;
+      } else {
+        mode = 'pending';
+        sx = e.clientX; sy = e.clientY; st = performance.now();
+        clearTimeout(lpTimer);
+        lpTimer = setTimeout(() => {
+          if (mode === 'pending') { mode = 'drag'; pressLeft(); flash('拖动'); }
+        }, 280);
+      }
+    } else if (pts.size === 2) {
+      clearTimeout(lpTimer);
+      if (mode === 'drag') releaseLeft();
+      mode = 'scroll2';
+      twoStartT = performance.now(); twoMoved = 0;
+      lastCX = centX(); lastCY = centY();
+      wheelX = wheelY = remWX = remWY = 0;
+      pinch = false; zoomAcc = 0; remZoom = 0; pinchRef = null;
+      const arr = [...pts.values()];
+      d0 = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
+      lastDist = d0;
+    } else {
+      clearTimeout(lpTimer);
+      if (mode === 'drag') releaseLeft();
+      mode = 'swipe3';
+      threeStart = { x: centX(), y: centY(), t: performance.now() };
+      sw3dx = sw3dy = 0;
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  function onPointerMove(e) {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    p.x = e.clientX; p.y = e.clientY;
+
+    if (pts.size === 1) {
+      if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
+        mode = 'move';
+        clearTimeout(lpTimer);
+        lastCX = sx; lastCY = sy;
+      }
+      if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > 4) {
+        mode = 'drag';
+        send({ t: 'dblstart' });
+        flash('拖动');
+      }
+      if (mode === 'move' || mode === 'drag') {
+        accX += e.clientX - lastCX;
+        accY += e.clientY - lastCY;
+        lastCX = e.clientX; lastCY = e.clientY;
+      }
+    } else if (pts.size === 2 && mode === 'scroll2') {
+      const arr = [...pts.values()];
+      const dist = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
+      const nx = centX(), ny = centY();
+      const dx = nx - lastCX, dy = ny - lastCY;
+      lastCX = nx; lastCY = ny;
+      twoMoved += Math.hypot(dx, dy);
+
+      // 真·捏合的特征：两指间距在短时间内明显变化，而整体重心几乎没动。
+      // 滚动时重心会大幅移动、间距基本不变，用这个区分，避免边滚边缩放。
+      if (!pinch) {
+        const now = performance.now();
+        if (!pinchRef || now - pinchRef.t > 140) {
+          pinchRef = { t: now, d: dist, x: nx, y: ny };
+        } else {
+          const dd = Math.abs(dist - pinchRef.d);
+          const dc = Math.hypot(nx - pinchRef.x, ny - pinchRef.y);
+          if (dd > 22 && dc < dd * 0.85) {
+            pinch = true;
+            lastDist = dist;
+            wheelX = wheelY = 0;
+            pinchRef = null;
+            flash('缩放');
+          }
+        }
+      }
+      if (pinch) {
+        zoomAcc += dist - lastDist;
+        lastDist = dist;
+      } else {
+        // 换算成「格」：一指行程 PX_PER_NOTCH 像素算一格滚轮
+        wheelX += (dx / PX_PER_NOTCH) * S.speed;
+        wheelY += (dy / PX_PER_NOTCH) * S.speed;
+      }
+    } else if (mode === 'swipe3' && pts.size === 3) {
+      const dx = centX() - threeStart.x;
+      const dy = centY() - threeStart.y;
+      if (Math.abs(dx) > Math.abs(sw3dx)) sw3dx = dx;
+      if (Math.abs(dy) > Math.abs(sw3dy)) sw3dy = dy;
+    }
+  }
+
+  pad.addEventListener('pointermove', (e) => {
+    // 两帧之间的所有采样点都拿到（120Hz 触屏在 60Hz 屏幕上会丢样本），
+    // 移动和滚动都因此更顺、更跟手。
+    const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (list && list.length > 1) {
+      for (const ce of list) onPointerMove(ce);
+    } else {
+      onPointerMove(e);
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  function endPointer(e) {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    const now = performance.now();
+
+    if (pts.size === 0) {
+      clearTimeout(lpTimer);
+      if (mode === 'pending') {
+        if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
+          if (lockOn) setLock(false);   // 锁定状态下轻点 = 松开
+          else { click('l'); lastTapEnd = now; }
+        }
+      } else if (mode === 'armed') {
+        // 第二下没有移动就松开 = 普通的第二次单击，双击（如标题栏最大化）照常
+        if (lockOn) setLock(false); else click('l');
+      } else if (mode === 'drag') {
+        releaseLeft();
+      } else if (mode === 'scroll2') {
+        if (!pinch && twoMoved < 15 && now - twoStartT < 320) {
+          click('r');
+        } else if (!pinch) {
+          inertia = velY * 0.55;          // 松手后按原生触控板那样继续滑一段（单位：格）
+        }
+      } else if (mode === 'swipe3' && threeStart) {
+        const dur = now - threeStart.t;
+        const moved = Math.hypot(sw3dx, sw3dy);
+        if (moved < 26 && dur < 380) {
+          send({ t: 'k', vk: 0x5B });                                  // 三指轻点 = 开始菜单
+        } else if (Math.abs(sw3dy) > Math.abs(sw3dx) && Math.abs(sw3dy) > 70) {
+          if (sw3dy < 0) send({ t: 'ks', mods: ['win'], vk: 0x09 });   // 上滑 = 任务视图
+          else send({ t: 'ks', mods: ['win'], vk: 0x44 });             // 下滑 = 显示桌面
+        } else if (Math.abs(sw3dx) > 70) {
+          if (sw3dx < 0) send({ t: 'ks', mods: ['alt'], vk: 0x09 });   // 左滑 = 下一个窗口
+          else send({ t: 'ks', mods: ['alt', 'shift'], vk: 0x09 });    // 右滑 = 上一个窗口
+        }
+      }
+      mode = Math.abs(inertia) >= 0.2 ? 'inertia' : 'idle';
+    } else if (pts.size === 1) {
+      if (mode === 'scroll2' || mode === 'swipe3') {
+        mode = 'move';
+        const p = pts.values().next().value;
+        lastCX = p.x; lastCY = p.y;
+      }
+    }
+    e.preventDefault();
+  }
+
+  pad.addEventListener('pointerup', endPointer);
+  pad.addEventListener('pointercancel', endPointer);
+
+  /* 拦掉安卓原生手势：长按选词、放大镜、右键菜单、拖拽图片。
+     光靠 CSS 的 user-select 不够，必须在 touchstart 上 preventDefault。 */
+  const killSelection = () => {
+    try {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) sel.removeAllRanges();
+    } catch (_) {}
+  };
+  ['touchstart', 'touchmove', 'touchend', 'selectstart', 'contextmenu', 'dragstart']
+    .forEach((type) => {
+      pad.addEventListener(type, (e) => {
+        if (e.cancelable) e.preventDefault();
+        killSelection();
+      }, { passive: false, capture: true });
+    });
+
+  /* ---------------- 每帧发送 ---------------- */
+  function tick() {
+    // 全屏键盘上的滑动：移动光标
+    if (kfAccX || kfAccY) {
+      kfRemX += kfAccX * S.sens;
+      kfRemY += kfAccY * S.sens;
+      kfAccX = 0; kfAccY = 0;
+      const ix = Math.trunc(kfRemX), iy = Math.trunc(kfRemY);
+      if (ix || iy) { kfRemX -= ix; kfRemY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
+    }
+    // 全屏键盘上的双指：滚动
+    if (kfScroll) {
+      kfScrollRem += kfScroll;
+      kfScroll = 0;
+      const ny = Math.trunc(kfScrollRem * STEPS_PER_NOTCH);
+      if (ny) {
+        kfScrollRem -= ny / STEPS_PER_NOTCH;
+        send({ t: 's', dy: WHEEL_STEP * (S.natural ? ny : -ny) });
+      }
+    }
+
+    if (mode === 'move' || mode === 'drag') {
+      let dx = accX, dy = accY;
+      accX = 0; accY = 0;
+      let f = S.sens;
+      if (S.accel) {
+        const sp = Math.hypot(dx, dy);
+        f *= 0.62 + Math.min(sp / 26, 1) * 0.9;
+      }
+      remX += dx * f; remY += dy * f;
+      const ix = Math.trunc(remX), iy = Math.trunc(remY);
+      if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
+    } else {
+      accX = 0; accY = 0;
+    }
+
+    if (mode === 'scroll2') {
+      if (pinch) {
+        remZoom += zoomAcc / PX_PER_NOTCH;
+        zoomAcc = 0;
+        const nz = Math.trunc(remZoom);
+        if (nz) { remZoom -= nz; send({ t: 'zoom', d: WHEEL_NOTCH * nz }); }
+        velY = 0;
+      } else {
+        const ux = wheelX, uy = wheelY;
+        wheelX = 0; wheelY = 0;
+        // 按 1/8 格的细粒度发送：比整格连续，又比零碎小数在各程序间一致
+        if (Math.abs(ux) > Math.abs(uy) * 1.5) {
+          remWX += ux;
+          const nx = Math.trunc(remWX * STEPS_PER_NOTCH);
+          if (nx) {
+            remWX -= nx / STEPS_PER_NOTCH;
+            send({ t: 's', dx: WHEEL_STEP * (S.natural ? -nx : nx) });
+          }
+        } else {
+          remWY += uy;
+          const ny = Math.trunc(remWY * STEPS_PER_NOTCH);
+          if (ny) {
+            remWY -= ny / STEPS_PER_NOTCH;
+            send({ t: 's', dy: WHEEL_STEP * (S.natural ? ny : -ny) });
+            velY = ny / STEPS_PER_NOTCH;
+          }
+        }
+      }
+    } else if (mode === 'inertia') {
+      inertia *= 0.90;
+      if (Math.abs(inertia) < 0.02) {
+        inertia = 0; mode = 'idle';
+      } else {
+        remWY += inertia;
+        const ny = Math.trunc(remWY * STEPS_PER_NOTCH);
+        if (ny) {
+          remWY -= ny / STEPS_PER_NOTCH;
+          send({ t: 's', dy: WHEEL_STEP * (S.natural ? ny : -ny) });
+        }
+      }
+      wheelX = 0; wheelY = 0;
+    } else {
+      wheelX = 0; wheelY = 0;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  /* ---------------- 设置 ---------------- */
+  const sens = document.getElementById('sens');
+  const sensVal = document.getElementById('sensVal');
+  const speed = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
+  const accel = document.getElementById('accel');
+  const natural = document.getElementById('natural');
+  const absmode = document.getElementById('absmode');
+
+  sens.value = S.sens; sensVal.textContent = S.sens.toFixed(1);
+  speed.value = S.speed; speedVal.textContent = S.speed.toFixed(1);
+  accel.checked = S.accel; natural.checked = S.natural; absmode.checked = S.abs;
+
+  sens.addEventListener('input', () => {
+    S.sens = parseFloat(sens.value);
+    sensVal.textContent = S.sens.toFixed(1);
+    saveS();
+  });
+  speed.addEventListener('input', () => {
+    S.speed = parseFloat(speed.value);
+    speedVal.textContent = S.speed.toFixed(1);
+    saveS();
+  });
+  accel.addEventListener('change', () => { S.accel = accel.checked; saveS(); });
+  natural.addEventListener('change', () => { S.natural = natural.checked; saveS(); });
+  absmode.addEventListener('change', () => {
+    S.abs = absmode.checked; saveS();
+    send({ t: 'cfg', abs: S.abs });
+  });
+
+  document.getElementById('gear').addEventListener('click', () => panel.classList.toggle('open'));
+
+  /* 拖动锁定：点一下按住左键，自由拖动，再点一下松开。
+     用于「双击拖」被 Windows 判成双击最大化 的场合。 */
+  let lockOn = false, lockTimer = 0;
+  const lockBtn = document.getElementById('lockBtn');
+
+  function setLock(on) {
+    if (on === lockOn) return;
+    lockOn = on;
+    clearTimeout(lockTimer);
+    if (on) {
+      down('l');
+      flash('左键已按住，直接拖');
+      lockTimer = setTimeout(() => { setLock(false); flash('已自动松开'); }, 20000);
+    } else {
+      up('l');
+      flash('已松开');
+    }
+    lockBtn.classList.toggle('on', on);
+  }
+
+  lockBtn.addEventListener('click', () => setLock(!lockOn));
+  ws.addEventListener?.('close', () => setLock(false));
+  document.getElementById('full').addEventListener('click', () => {
+    const el = document.documentElement;
+    if (!document.fullscreenElement) el.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.();
+  });
+  pad.addEventListener('pointerdown', () => { if (panel.classList.contains('open')) panel.classList.remove('open'); }, true);
+
+  /* ---------------- 键盘（走电脑输入法） ---------------- */
+  const kbPad = document.getElementById('kbPad');
+  const kbRawBox = document.getElementById('kbRawBox');
+  const kfPadEl = document.getElementById('kfPad');
+  const spKeysEl = document.getElementById('spKeys');
+  let stickyMods = [];
+  let curLayer = 'main';
+
+  // 每个键：{ label, vk, w(宽度权重), cls }
+  const K = (label, vk, w, cls) => ({ label, vk, w, cls });
+  const TXT = (label, vk, w) => ({ label, vk, w });
+
+  // 主层：只保留打字必需键，把不常用的挪到 Fn 层，减少误触
+  const LAYER_MAIN = [
+    { h: 0.82, cls: 'indent0', keys: [
+      TXT('1',0x31),TXT('2',0x32),TXT('3',0x33),TXT('4',0x34),TXT('5',0x35),
+      TXT('6',0x36),TXT('7',0x37),TXT('8',0x38),TXT('9',0x39),TXT('0',0x30),
+    ] },
+    { cls: 'indent0', keys: [
+      TXT('q',0x51),TXT('w',0x57),TXT('e',0x45),TXT('r',0x52),TXT('t',0x54),
+      TXT('y',0x59),TXT('u',0x55),TXT('i',0x49),TXT('o',0x4F),TXT('p',0x50),
+    ] },
+    { cls: 'indent1', keys: [
+      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),TXT('f',0x46),TXT('g',0x47),
+      TXT('h',0x48),TXT('j',0x4A),TXT('k',0x4B),TXT('l',0x4C),
+    ] },
+    { cls: 'indent2', keys: [
+      K('⇧',0x10,1.5,'mod'),TXT('z',0x5A),TXT('x',0x58),TXT('c',0x43),TXT('v',0x56),
+      TXT('b',0x42),TXT('n',0x4E),TXT('m',0x4D),TXT(',',0xBC),TXT('.',0xBE),
+      K('⌫',0x08,1.45,'fn'),
+    ] },
+    { keys: [
+      K('123',-1,1.15,'mod'),K('Ctrl',0x11,1.05,'mod'),K('空格',0x20,4.6,'space'),
+      K('回车',0x0D,1.75,'fn'),
+    ] },
+  ];
+
+  // Fn 层：导航、窗口、功能键
+  const LAYER_FN = [
+    { keys: [
+      K('Esc',0x1B,1.1,'fn'),K('Tab',0x09,1.1,'fn'),K('Win',0x5B,1.1,'mod'),K('Alt',0x12,1.1,'mod'),
+      K('Ctrl',0x11,1.1,'mod'),K('Del',0x2E,1.1,'fn'),
+    ] },
+    { keys: [
+      TXT('←',0x25),TXT('↑',0x26),TXT('↓',0x28),TXT('→',0x27),
+      K('Home',0x24,1.3,'fn'),K('End',0x23,1.3,'fn'),
+    ] },
+    { keys: [
+      K('PgUp',0x21,1.3,'fn'),K('PgDn',0x22,1.3,'fn'),
+      K('-',0xBD,1,'fn'),K('=',0xBB,1,'fn'),
+      K('/',0xBF,1,'fn'),K('\\',0xDC,1,'fn'),
+    ] },
+    { keys: [
+      K('ABC',-1,1.4,'mod'),K('空格',0x20,4.2,'space'),K('回车',0x0D,1.7,'fn'),
+    ] },
+  ];
+
+  const MOD_NAME = { 0x10: 'shift', 0x11: 'ctrl', 0x12: 'alt', 0x5B: 'win' };
+
+  function clearSticky() {
+    stickyMods = [];
+    document.querySelectorAll('#kbPad .kbkey.on, #kfPad .kbkey.on, #spKeys .kbkey.on')
+      .forEach((el) => el.classList.remove('on'));
+  }
+
+  function pressKey(vk, btn) {
+    if (vk === -1) {                       // 层切换键
+      setLayer(curLayer === 'main' ? 'fn' : 'main');
+      return;
+    }
+    const modName = MOD_NAME[vk];
+    if (modName) {                         // 修饰键：点一下点亮，再点取消
+      const idx = stickyMods.indexOf(modName);
+      if (idx >= 0) { stickyMods.splice(idx, 1); btn.classList.remove('on'); }
+      else { stickyMods.push(modName); btn.classList.add('on'); }
+      return;
+    }
+    if (stickyMods.length) {
+      send({ t: 'ks', mods: stickyMods.slice(), vk });
+      clearSticky();
+    } else {
+      send({ t: 'k', vk });
+    }
+    if (btn) {
+      btn.classList.add('hit');
+      setTimeout(() => btn.classList.remove('hit'), 110);
+    }
+    if (navigator.vibrate) navigator.vibrate(8);
+  }
+
+  function renderKeys(container, layerName, bindClick) {
+    container.innerHTML = '';
+    const rows = layerName === 'fn' ? LAYER_FN : LAYER_MAIN;
+    rows.forEach((row) => {
+      const r = document.createElement('div');
+      r.className = 'kbrow' + (row.cls ? ' ' + row.cls : '');
+      if (row.h) r.style.flexGrow = String(row.h);
+      row.keys.forEach((key) => {
+        const b = document.createElement('button');
+        b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
+        if (key.w) b.style.flexGrow = String(key.w);
+        b.textContent = key.label;
+        b.dataset.vk = key.vk;
+        if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
+        r.appendChild(b);
+      });
+      container.appendChild(r);
+    });
+  }
+
+  function renderAll() {
+    renderKeys(kbPad, curLayer, true);
+    // 全屏/分屏键盘不绑 click：由手势层判定「轻点 = 按键」，否则滑动手势会误触
+    renderKeys(kfPadEl, curLayer, false);
+    renderKeys(spKeysEl, curLayer, true);
+  }
+
+  function setLayer(name) {
+    curLayer = name;
+    clearSticky();
+    renderAll();
+  }
+
+  renderAll();
+
+  document.getElementById('kbBtn').addEventListener('click', () => {
+    kb.classList.toggle('open');
+    if (kb.classList.contains('open') && document.activeElement) {
+      document.activeElement.blur();     // 不要唤起平板自己的输入法
+    }
+  });
+
+  document.getElementById('kbCloseBtn').addEventListener('click', () => kb.classList.remove('open'));
+
+  document.getElementById('kbRawBtn').addEventListener('click', (e) => {
+    kbRawBox.classList.toggle('open');
+    e.target.textContent = kbRawBox.classList.contains('open') ? '收起' : '直接输入';
+  });
+
+  /* ---------------- 全屏键盘：轻点按键，滑动当触控板 ---------------- */
+  const kbfull = document.getElementById('kbfull');
+
+  const kfCentX = () => { let s = 0; for (const p of kfPts.values()) s += p.x; return kfPts.size ? s / kfPts.size : 0; };
+  const kfCentY = () => { let s = 0; for (const p of kfPts.values()) s += p.y; return kfPts.size ? s / kfPts.size : 0; };
+
+  kbfull.addEventListener('pointerdown', (e) => {
+    try { kbfull.setPointerCapture(e.pointerId); } catch (_) {}
+    kfPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (kfPts.size === 1) {
+      kfMode = 'tap';
+      kfStartT = performance.now();
+      kfMoved = 0;
+      kfSX = e.clientX; kfSY = e.clientY;
+      kfLastX = kfSX; kfLastY = kfSY;
+      kfTapEl = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
+    } else {
+      kfMode = 'scroll';
+      kfTapEl = null;
+      kfLastX = kfCentX(); kfLastY = kfCentY();
+      kfScroll = 0; kfScrollRem = 0;
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  function kfMove(e) {
+    const p = kfPts.get(e.pointerId);
+    if (!p) return;
+    p.x = e.clientX; p.y = e.clientY;
+
+    if (kfPts.size === 1) {
+      if (kfMode === 'tap') {
+        kfMoved = Math.hypot(e.clientX - kfSX, e.clientY - kfSY);
+        if (kfMoved > 12) {          // 划开了 → 当触控板用，不触发按键
+          kfMode = 'move';
+          kfTapEl = null;
+          kfLastX = kfSX; kfLastY = kfSY;
+        }
+      }
+      if (kfMode === 'move') {
+        kfAccX += e.clientX - kfLastX;
+        kfAccY += e.clientY - kfLastY;
+        kfLastX = e.clientX; kfLastY = e.clientY;
+      }
+    } else if (kfPts.size === 2 && kfMode === 'scroll') {
+      const cx = kfCentX(), cy = kfCentY();
+      kfScroll += ((cy - kfLastY) / PX_PER_NOTCH) * S.speed;
+      kfLastX = cx; kfLastY = cy;
+    }
+  }
+
+  kbfull.addEventListener('pointermove', (e) => {
+    const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (list && list.length > 1) { for (const ce of list) kfMove(ce); }
+    else kfMove(e);
+    e.preventDefault();
+  }, { passive: false });
+
+  function kfUp(e) {
+    if (!kfPts.has(e.pointerId)) return;
+    kfPts.delete(e.pointerId);
+
+    if (kfPts.size === 0) {
+      if (kfMode === 'tap' && kfTapEl && performance.now() - kfStartT < 600) {
+        pressKey(parseInt(kfTapEl.dataset.vk, 0), kfTapEl);
+      }
+      kfMode = 'idle';
+      kfTapEl = null;
+    } else if (kfPts.size === 1 && kfMode === 'scroll') {
+      kfMode = 'move';
+      const p = kfPts.values().next().value;
+      kfLastX = p.x; kfLastY = p.y;
+    }
+    e.preventDefault();
+  }
+
+  kbfull.addEventListener('pointerup', kfUp);
+  kbfull.addEventListener('pointercancel', kfUp);
+
+  document.getElementById('kfBtn').addEventListener('click', () => {
+    kb.classList.remove('open');
+    kbfull.classList.add('open');
+  });
+  document.getElementById('kfClose').addEventListener('click', () => kbfull.classList.remove('open'));
+
+  /* 分屏模式 */
+  const splitmode = document.getElementById('splitmode');
+  document.getElementById('spBtn').addEventListener('click', () => {
+    kb.classList.remove('open');
+    splitmode.classList.add('open');
+  });
+  document.getElementById('spClose').addEventListener('click', () => splitmode.classList.remove('open'));
+
+  /* 给小触控板用的简化手势（移动 / 轻点左键 / 双指滚动） */
+  function attachPadArea(el) {
+    const p = new Map();
+    let mode = 'idle';
+    let sx = 0, sy = 0, st = 0, lx = 0, ly = 0;
+    let accX = 0, accY = 0, remX = 0, remY = 0, sc = 0, scRem = 0;
+
+    const cx = () => { let s = 0; for (const q of p.values()) s += q.x; return p.size ? s / p.size : 0; };
+    const cy = () => { let s = 0; for (const q of p.values()) s += q.y; return p.size ? s / p.size : 0; };
+
+    el.addEventListener('pointerdown', (e) => {
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      p.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (p.size === 1) {
+        mode = 'pending';
+        sx = e.clientX; sy = e.clientY;
+        lx = sx; ly = sy; st = performance.now();
+      } else {
+        mode = 'scroll';
+        lx = cx(); ly = cy(); sc = 0; scRem = 0;
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    function onMove(e) {
+      const q = p.get(e.pointerId);
+      if (!q) return;
+      q.x = e.clientX; q.y = e.clientY;
+
+      if (p.size === 1) {
+        if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
+          mode = 'move';
+          lx = sx; ly = sy;
+        }
+        if (mode === 'move') {
+          accX += e.clientX - lx;
+          accY += e.clientY - ly;
+          lx = e.clientX; ly = e.clientY;
+        }
+      } else if (mode === 'scroll') {
+        const ny = cy();
+        sc += ((ny - ly) / PX_PER_NOTCH) * S.speed;
+        lx = cx(); ly = ny;
+      }
+    }
+
+    el.addEventListener('pointermove', (e) => {
+      const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+      if (list && list.length > 1) { for (const ce of list) onMove(ce); }
+      else onMove(e);
+      e.preventDefault();
+    }, { passive: false });
+
+    function up(e) {
+      if (!p.has(e.pointerId)) return;
+      p.delete(e.pointerId);
+      if (p.size === 0) {
+        if (mode === 'pending' && performance.now() - st < 320) click('l');
+        mode = 'idle';
+      } else if (p.size === 1) {
+        mode = 'move';
+        const q = p.values().next().value;
+        lx = q.x; ly = q.y;
+      }
+      e.preventDefault();
+    }
+
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+
+    function frame() {
+      if (accX || accY) {
+        remX += accX * S.sens;
+        remY += accY * S.sens;
+        accX = 0; accY = 0;
+        const ix = Math.trunc(remX), iy = Math.trunc(remY);
+        if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
+      }
+      if (sc) {
+        scRem += sc;
+        sc = 0;
+        const ny = Math.trunc(scRem * STEPS_PER_NOTCH);
+        if (ny) {
+          scRem -= ny / STEPS_PER_NOTCH;
+          send({ t: 's', dy: WHEEL_STEP * (S.natural ? ny : -ny) });
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  attachPadArea(document.getElementById('spPad'));
+
+  /* ---------------- 环绕模式：上打字区 / 下触控板 / 两侧功能区 ---------------- */
+  const trmode = document.getElementById('trmode');
+
+  const TRIP_TOP = [
+    { h: 0.82, keys: [
+      TXT('1',0x31),TXT('2',0x32),TXT('3',0x33),TXT('4',0x34),TXT('5',0x35),
+      TXT('6',0x36),TXT('7',0x37),TXT('8',0x38),TXT('9',0x39),TXT('0',0x30),
+    ] },
+    { keys: [
+      TXT('q',0x51),TXT('w',0x57),TXT('e',0x45),TXT('r',0x52),TXT('t',0x54),
+      TXT('y',0x59),TXT('u',0x55),TXT('i',0x49),TXT('o',0x4F),TXT('p',0x50),
+    ] },
+    { cls: 'indent1', keys: [
+      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),TXT('f',0x46),TXT('g',0x47),
+      TXT('h',0x48),TXT('j',0x4A),TXT('k',0x4B),TXT('l',0x4C),
+    ] },
+    { cls: 'indent2', keys: [
+      K('⇧',0x10,1.5,'mod'),TXT('z',0x5A),TXT('x',0x58),TXT('c',0x43),TXT('v',0x56),
+      TXT('b',0x42),TXT('n',0x4E),TXT('m',0x4D),TXT(',',0xBC),TXT('.',0xBE),
+      K('⌫',0x08,1.45,'fn'),
+    ] },
+    { keys: [
+      K('空格',0x20,5.2,'space'),K('回车',0x0D,1.8,'fn'),
+    ] },
+  ];
+
+  const TRIP_LEFT = [['Esc',0x1B],['Tab',0x09],['Win',0x5B],['Ctrl',0x11],['Alt',0x12],['Del',0x2E]];
+  const TRIP_RIGHT = [['←',0x25],['↑',0x26],['↓',0x28],['→',0x27],
+                      ['Home',0x24],['End',0x23],['PgUp',0x21],['PgDn',0x22]];
+
+  function buildTri() {
+    const top = document.getElementById('trTop');
+    top.innerHTML = '';
+    TRIP_TOP.forEach((row) => {
+      const r = document.createElement('div');
+      r.className = 'kbrow' + (row.cls ? ' ' + row.cls : '');
+      if (row.h) r.style.flexGrow = String(row.h);
+      row.keys.forEach((key) => {
+        const b = document.createElement('button');
+        b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
+        if (key.w) b.style.flexGrow = String(key.w);
+        b.textContent = key.label;
+        b.dataset.vk = key.vk;
+        r.appendChild(b);
+      });
+      top.appendChild(r);
+    });
+
+    const mkFunc = (el, list) => {
+      el.innerHTML = '';
+      list.forEach(([label, vk]) => {
+        const b = document.createElement('button');
+        b.className = 'kbkey fn';
+        b.textContent = label;
+        b.dataset.vk = vk;
+        el.appendChild(b);
+      });
+    };
+    mkFunc(document.getElementById('trLeft'), TRIP_LEFT);
+    mkFunc(document.getElementById('trRight'), TRIP_RIGHT);
+  }
+
+  buildTri();
+
+  // 顶部与两侧都走点击；触控板由 attachPadArea 处理
+  trmode.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
+    if (b && b.dataset.vk !== undefined) pressKey(parseInt(b.dataset.vk, 10), b);
+  });
+
+  document.getElementById('trBtn').addEventListener('click', () => {
+    kb.classList.remove('open');
+    trmode.classList.add('open');
+  });
+  document.getElementById('trClose').addEventListener('click', () => trmode.classList.remove('open'));
+
+  attachPadArea(document.getElementById('trPad'));
+
+  let lastText = '';
+  ta.addEventListener('input', (e) => {
+    if (e.isComposing) return;              // 输入法还在拼，先别发
+    const v = ta.value;
+    let i = 0;
+    while (i < v.length && i < lastText.length && v[i] === lastText[i]) i++;
+    let j = 0;
+    while (j < v.length - i && j < lastText.length - i && v[v.length - 1 - j] === lastText[lastText.length - 1 - j]) j++;
+    const removed = lastText.length - i - j;
+    const inserted = v.slice(i, v.length - j);
+    if (removed > 0) send({ t: 'bs', n: removed });
+    if (inserted) send({ t: 'txt', s: inserted });
+    lastText = v;
+  });
+
+  document.getElementById('clearTa').addEventListener('click', () => {
+    ta.value = ''; lastText = '';
+  });
+
+  // 注意：不要再遍历 [data-vk] 绑 click —— 键盘按键是动态生成的，
+  // 那样会和 buildKeys 里的处理叠加，导致一次点击发出两次按键。
+
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('selectstart', (e) => {
+    // 输入框里要能正常选中文字，其它地方一律不允许
+    if (e.target !== ta && !ta.contains(e.target)) e.preventDefault();
+  });
+})();
+</script>
+</body>
+</html>

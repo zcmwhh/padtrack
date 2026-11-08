@@ -1,0 +1,28 @@
+# 运行产物
+padtrack.log
+padtrack.pid
+key.txt
+当前地址.txt
+
+# 本地备份（每次改动前的快照）
+backup/
+
+# 打包产物
+build/
+dist/
+发布/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# 本机工具链的临时目录（含会话记录，不要上传）
+.dsh-ops/

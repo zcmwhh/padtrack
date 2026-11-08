@@ -1,0 +1,707 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""PadTrack —— 把安卓平板/手机变成 Windows 的触控板。
+
+零第三方依赖：只用 Python 标准库 + Windows user32.SendInput。
+平板端不需要装 App，浏览器打开网页即可。
+
+用法：
+    python server.py            # 默认 0.0.0.0:8765，自动生成 4 位访问码
+    python server.py --port 9000 --key 1234
+"""
+
+import argparse
+import base64
+import ctypes
+import errno
+import hashlib
+import json
+import os
+import random
+import socket
+import socketserver
+import struct
+import subprocess
+import sys
+import threading
+import time
+from ctypes import wintypes
+from urllib.parse import parse_qs
+
+# 打包成 exe 时，网页文件解压在临时目录（sys._MEIPASS），
+# 而日志 / 访问码 / pid 要留在 exe 旁边，所以两个目录分开算。
+if getattr(sys, "frozen", False):
+    HERE = os.path.dirname(os.path.abspath(sys.executable))
+    RES_DIR = getattr(sys, "_MEIPASS", HERE)
+else:
+    HERE = os.path.dirname(os.path.abspath(__file__))
+    RES_DIR = HERE
+
+WEB_DIR = os.path.join(RES_DIR, "web")
+LOG_PATH = os.path.join(HERE, "padtrack.log")
+ADDR_PATH = os.path.join(HERE, "当前地址.txt")
+KEY_PATH = os.path.join(HERE, "key.txt")
+PID_PATH = os.path.join(HERE, "padtrack.pid")
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# ---------------------------------------------------------------- SendInput
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+ULONG_PTR = ctypes.c_size_t
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _anonymous_ = ("u",)
+    _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
+
+
+user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+user32.SendInput.restype = wintypes.UINT
+user32.GetCursorPos.argtypes = (ctypes.POINTER(wintypes.POINT),)
+user32.GetCursorPos.restype = wintypes.BOOL
+user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+user32.SetCursorPos.restype = wintypes.BOOL
+
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x1000
+
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+
+VK = {
+    "win": 0x5B, "ctrl": 0x11, "alt": 0x12, "shift": 0x10,
+    "enter": 0x0D, "tab": 0x09, "esc": 0x1B, "back": 0x08, "space": 0x20,
+}
+
+_input_lock = threading.Lock()
+_state = {"abs": False}          # 相对移动 / 绝对定位
+
+
+def _send(inp):
+    with _input_lock:
+        return user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+
+def _mouse(dx=0, dy=0, data=0, flags=0):
+    inp = INPUT(type=INPUT_MOUSE)
+    inp.mi = MOUSEINPUT(int(dx), int(dy), int(data) & 0xFFFFFFFF, int(flags), 0, 0)
+    return _send(inp)
+
+
+def _key(vk=0, scan=0, flags=0):
+    inp = INPUT(type=INPUT_KEYBOARD)
+    inp.ki = KEYBDINPUT(int(vk) & 0xFFFF, int(scan) & 0xFFFF, int(flags), 0, 0)
+    return _send(inp)
+
+
+BTN = {
+    "l": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+    "r": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+    "m": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+}
+
+
+def act_move(dx, dy):
+    dx = max(-500, min(500, int(dx)))
+    dy = max(-500, min(500, int(dy)))
+    if not dx and not dy:
+        return
+    if _state["abs"]:
+        pt = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        user32.SetCursorPos(pt.x + dx, pt.y + dy)
+    else:
+        _mouse(dx, dy, 0, MOUSEEVENTF_MOVE)
+
+
+def act_down(b):
+    _mouse(0, 0, 0, BTN[b][0])
+
+
+def act_up(b):
+    _mouse(0, 0, 0, BTN[b][1])
+
+
+def act_click(b):
+    act_down(b)
+    act_up(b)
+
+
+def act_wheel(units):
+    _mouse(0, 0, int(units), MOUSEEVENTF_WHEEL)
+
+
+def act_hwheel(units):
+    _mouse(0, 0, int(units), MOUSEEVENTF_HWHEEL)
+
+
+def act_zoom(units):
+    """按住 Ctrl 滚轮 —— 浏览器/看图工具里的缩放。
+
+    Ctrl 必须一直按着，等目标程序真正处理到 WM_MOUSEWHEEL 那一刻仍然是按下状态，
+    否则 WPS 这类用 GetKeyState 判断的程序会认为没按 Ctrl，缩放就没反应。
+    """
+    _key(VK["ctrl"], 0, 0)
+    time.sleep(0.02)
+    act_wheel(units)
+    time.sleep(0.06)
+    _key(VK["ctrl"], 0, KEYEVENTF_KEYUP)
+
+
+def act_drag_start():
+    """双击拖动的起手动作。
+
+    Windows 判双击要同时满足「时间 < 双击间隔」和「位置偏差 < SM_CXDOUBLECLK
+    (默认 4px)」。这里先把光标挪开 8px 再按下左键，位置条件不成立，系统就不会
+    发 WM_LBUTTONDBLCLK（标题栏也就不会最大化）；随后把光标挪回原位，拖动
+    接着从原处开始，用户感觉不到偏移。
+    """
+    _mouse(8, 8, 0, MOUSEEVENTF_MOVE)
+    _mouse(0, 0, 0, MOUSEEVENTF_LEFTDOWN)
+    _mouse(-8, -8, 0, MOUSEEVENTF_MOVE)
+
+
+def act_tap(vk):
+    _key(vk, 0, 0)
+    _key(vk, 0, KEYEVENTF_KEYUP)
+
+
+def act_combo(mods, vk):
+    mods = [VK[m] for m in mods if m in VK]
+    for m in mods:
+        _key(m, 0, 0)
+    _key(vk, 0, 0)
+    _key(vk, 0, KEYEVENTF_KEYUP)
+    for m in reversed(mods):
+        _key(m, 0, KEYEVENTF_KEYUP)
+
+
+def act_text(text):
+    for ch in text[:2000]:
+        if ch == "\n":
+            act_tap(VK["enter"])
+        elif ch == "\t":
+            act_tap(VK["tab"])
+        else:
+            cp = ord(ch)
+            if cp > 0xFFFF:                     # 极小概率，转代理对
+                cp -= 0x10000
+                hi = 0xD800 + (cp >> 10)
+                lo = 0xDC00 + (cp & 0x3FF)
+                for unit in (hi, lo):
+                    _key(0, unit, KEYEVENTF_UNICODE)
+                    _key(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+                continue
+            _key(0, cp, KEYEVENTF_UNICODE)
+            _key(0, cp, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+
+
+def handle_message(msg):
+    """处理一条来自平板的 JSON 指令。"""
+    t = msg.get("t")
+    if t == "m":
+        act_move(msg.get("dx", 0), msg.get("dy", 0))
+    elif t == "c":
+        b = msg.get("b", "l")
+        if b in BTN:
+            act_click(b)
+    elif t == "d":
+        b = msg.get("b", "l")
+        if b in BTN:
+            act_down(b)
+    elif t == "u":
+        b = msg.get("b", "l")
+        if b in BTN:
+            act_up(b)
+    elif t == "s":
+        if msg.get("dy"):
+            act_wheel(msg["dy"])
+        if msg.get("dx"):
+            act_hwheel(msg["dx"])
+    elif t == "zoom":
+        act_zoom(int(msg.get("d", 0)))
+    elif t == "dblstart":
+        act_drag_start()
+    elif t == "k":
+        act_tap(int(msg.get("vk", 0)))
+    elif t == "ks":
+        act_combo(msg.get("mods", []), int(msg.get("vk", 0)))
+    elif t == "txt":
+        act_text(str(msg.get("s", "")))
+    elif t == "bs":
+        n = max(0, min(int(msg.get("n", 1)), 300))
+        for _ in range(n):
+            act_tap(VK["back"])
+    elif t == "cfg":
+        _state["abs"] = bool(msg.get("abs", False))
+    elif t == "ping":
+        return {"t": "pong", "ts": msg.get("ts", 0)}
+    return None
+
+
+# ---------------------------------------------------------------- WebSocket
+
+def ws_accept(key):
+    digest = hashlib.sha1((key + WS_GUID).encode()).digest()
+    return base64.b64encode(digest).decode()
+
+
+def ws_send(sock, payload, opcode=0x1):
+    if isinstance(payload, str):
+        payload = payload.encode()
+    header = bytearray([0x80 | opcode])
+    n = len(payload)
+    if n < 126:
+        header.append(n)
+    elif n < 65536:
+        header.append(126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(127)
+        header += struct.pack(">Q", n)
+    sock.sendall(bytes(header) + payload)
+
+
+class Reader:
+    def __init__(self, sock, buf=b""):
+        self.sock = sock
+        self.buf = buf
+
+    def read(self, n):
+        while len(self.buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("peer closed")
+            self.buf += chunk
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+
+def read_frame(reader):
+    b1, b2 = reader.read(2)
+    fin = bool(b1 & 0x80)
+    opcode = b1 & 0x0F
+    masked = bool(b2 & 0x80)
+    ln = b2 & 0x7F
+    if ln == 126:
+        ln = struct.unpack(">H", reader.read(2))[0]
+    elif ln == 127:
+        ln = struct.unpack(">Q", reader.read(8))[0]
+    if ln > 1 << 20:
+        raise ConnectionError("frame too large")
+    mask = reader.read(4) if masked else b"\x00\x00\x00\x00"
+    data = reader.read(ln) if ln else b""
+    if masked:
+        data = bytes(c ^ mask[i & 3] for i, c in enumerate(data))
+    return fin, opcode, data
+
+
+# ---------------------------------------------------------------- HTTP 服务
+
+PAGE_PATH = os.path.join(WEB_DIR, "index.html")
+
+FORBIDDEN = """<!doctype html><meta charset="utf-8">
+<body style="background:#111;color:#ddd;font:16px/1.8 sans-serif;padding:40px">
+<h2>访问码不对</h2>
+<p>请用电脑上启动时打印的完整地址打开，例如：<br>
+<code>http://192.168.1.10:8765/?k=1234</code></p>
+</body>"""
+
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
+        sock = self.request
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(15)
+            head, rest = self._read_head(sock)
+            if head is None:
+                return
+            lines = head.split(b"\r\n")
+            parts = lines[0].decode("latin-1").split()
+            if len(parts) < 2:
+                return
+            method, target = parts[0].upper(), parts[1]
+
+            headers = {}
+            for line in lines[1:]:
+                if b":" in line:
+                    k, v = line.split(b":", 1)
+                    headers[k.strip().lower().decode("latin-1")] = v.strip().decode("latin-1")
+
+            path, _, query = target.partition("?")
+            params = parse_qs(query)
+            key = params.get("k", [""])[0]
+
+            if path == "/ws" and headers.get("upgrade", "").lower() == "websocket":
+                if key != KEY:
+                    self._http(sock, 403, FORBIDDEN.encode())
+                    return
+                self._websocket(sock, headers, rest)
+                return
+
+            if method == "GET" and path in ("/", "/index.html"):
+                if key != KEY:
+                    self._http(sock, 403, FORBIDDEN.encode())
+                    return
+                try:
+                    with open(PAGE_PATH, "rb") as f:
+                        body = f.read()
+                except OSError as exc:
+                    self._http(sock, 500, f"缺少网页文件: {exc}".encode())
+                    return
+                self._http(sock, 200, body)
+                return
+
+            if method == "GET" and path == "/favicon.ico":
+                self._http(sock, 204, b"")
+                return
+
+            self._http(sock, 404, b"not found")
+        except Exception:
+            pass
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _read_head(sock, limit=65536):
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return None, b""
+            buf += chunk
+            if len(buf) > limit:
+                return None, b""
+        head, _, rest = buf.partition(b"\r\n\r\n")
+        return head, rest
+
+    @staticmethod
+    def _http(sock, code, body, ctype="text/html; charset=utf-8"):
+        reason = {200: "OK", 204: "No Content", 403: "Forbidden",
+                  404: "Not Found", 500: "Internal Server Error"}.get(code, "OK")
+        head = (
+            f"HTTP/1.1 {code} {reason}\r\n"
+            f"Content-Type: {ctype}\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Cache-Control: no-store\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        sock.sendall(head.encode() + body)
+
+    def _websocket(self, sock, headers, rest):
+        skey = headers.get("sec-websocket-key", "")
+        if not skey:
+            self._http(sock, 400, b"missing key")
+            return
+        resp = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {ws_accept(skey)}\r\n\r\n"
+        )
+        sock.sendall(resp.encode())
+        sock.settimeout(None)
+
+        reader = Reader(sock, rest)
+        peer = self.client_address[0]
+        log(f"平板已连接: {peer}")
+        try:
+            while True:
+                fin, opcode, data = read_frame(reader)
+                if opcode == 0x8:                       # close
+                    break
+                if opcode == 0x9:                       # ping
+                    ws_send(sock, data, 0xA)
+                    continue
+                if opcode == 0xA:                       # pong
+                    continue
+                if opcode not in (0x1, 0x2):
+                    continue
+                try:
+                    msg = json.loads(data.decode("utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                reply = handle_message(msg)
+                if reply is not None:
+                    ws_send(sock, json.dumps(reply, separators=(",", ":")))
+        except (ConnectionError, OSError, ValueError):
+            pass
+        finally:
+            log(f"平板已断开: {peer}")
+
+
+class Server(socketserver.ThreadingTCPServer):
+    # Windows 上 SO_REUSEADDR 会允许绑定已被占用的端口（请求仍被旧进程收走），
+    # 必须关掉，让 bind 直接报错，交给 bind_server 顺延端口。
+    allow_reuse_address = False
+    daemon_threads = True
+
+
+# ---------------------------------------------------------------- 启动
+
+def log(text):
+    print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
+
+
+def lan_ips():
+    ips = []
+    for probe in ("8.8.8.8", "1.1.1.1", "192.168.1.1"):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.settimeout(0.3)
+            s.connect((probe, 80))
+            ip = s.getsockname()[0]
+            if ip and ip not in ips and not ip.startswith("127."):
+                ips.append(ip)
+        except OSError:
+            pass
+        finally:
+            s.close()
+    return ips
+
+
+def use_hidden_output():
+    """pythonw 启动时没有控制台，stdout/stderr 为 None，这里改写到日志文件。"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return False
+    try:
+        stream = open(LOG_PATH, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        return True
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+    return True
+
+
+def msgbox(text, title="PadTrack"):
+    try:
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)
+    except Exception:
+        pass
+
+
+def resolve_key(explicit):
+    """访问码优先用命令行，其次沿用上次生成的值，最后随机生成并保存。"""
+    if explicit:
+        key = explicit.strip()
+    else:
+        key = ""
+        try:
+            with open(KEY_PATH, encoding="utf-8") as f:
+                key = f.read().strip()
+        except OSError:
+            pass
+        if not key:
+            key = f"{random.randint(0, 9999):04d}"
+    try:
+        with open(KEY_PATH, "w", encoding="utf-8") as f:
+            f.write(key)
+    except OSError:
+        pass
+    return key
+
+
+def write_address(port, ips):
+    lines = [
+        f"PadTrack  {time.strftime('%Y-%m-%d %H:%M:%S')} 已启动",
+        "",
+    ]
+    for ip in ips:
+        lines.append(f"平板浏览器打开:  http://{ip}:{port}/?k={KEY}")
+    lines += [
+        f"本机自测:        http://127.0.0.1:{port}/?k={KEY}",
+        "",
+        "停止服务: 双击 停止.bat",
+        "运行日志: padtrack.log",
+    ]
+    try:
+        with open(ADDR_PATH, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def bind_server(bind_addr, port, tries=10):
+    """端口被占用时自动顺延，返回 (server, 实际端口)。"""
+    last_exc = None
+    for candidate in range(port, port + tries):
+        try:
+            return Server((bind_addr, candidate), Handler), candidate
+        except OSError as exc:
+            last_exc = exc
+            busy = getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048, 10013)
+            if not busy:
+                break
+    raise last_exc if last_exc else OSError("bind failed")
+
+
+def pid_alive(pid):
+    """判断 PID 是否仍然存活（不依赖权限，只需 QUERY_LIMITED_INFORMATION）。"""
+    if pid <= 0:
+        return False
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    k32.GetExitCodeProcess.restype = wintypes.BOOL
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = k32.OpenProcess(0x1000, False, pid)      # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == 259                       # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _tasklist_has(pid):
+    """tasklist 兜底判断进程是否存在（OpenProcess 被拒时用）。"""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=6,
+            creationflags=0x08000000,          # CREATE_NO_WINDOW
+        ).stdout
+        return str(pid) in out
+    except Exception:
+        return False
+
+
+def find_existing(port=None, tries=None):
+    """已经跑着一个 PadTrack 就返回它的端口，否则 None。
+
+    只认 pid 文件，不做网络探测——某些环境下连接未开放的 127.0.0.1 端口会卡住
+    到超时，反而让启动变慢。
+    """
+    try:
+        with open(PID_PATH, encoding="utf-8") as f:
+            parts = f.read().split()
+        pid, running_port = int(parts[0]), int(parts[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+    if pid_alive(pid) or _tasklist_has(pid):
+        return running_port
+    return None
+
+
+def main():
+    global KEY
+    hidden = use_hidden_output()
+
+    ap = argparse.ArgumentParser(description="PadTrack：安卓平板变 PC 触控板")
+    ap.add_argument("--port", type=int, default=8765, help="监听端口，默认 8765")
+    ap.add_argument("--bind", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
+    ap.add_argument("--key", default=None, help="访问码，默认沿用上次生成的值")
+    args = ap.parse_args()
+
+    KEY = resolve_key(args.key)
+
+    if not os.path.exists(PAGE_PATH):
+        msg = f"找不到网页文件: {PAGE_PATH}"
+        print(msg)
+        if hidden:
+            msgbox(msg)
+        return 1
+
+    # 单实例：已经有 PadTrack 在跑就不再起第二个（否则每点一次就多一个）
+    existing = find_existing(args.port)
+    if existing is not None:
+        ips = lan_ips() or ["<本机IP>"]
+        write_address(existing, ips)
+        print(f"PadTrack 已经在运行（端口 {existing}），没有重复启动。"
+              f"\n地址见: {ADDR_PATH}", flush=True)
+        return 0
+
+    try:
+        srv, actual_port = bind_server(args.bind, args.port)
+    except OSError as exc:
+        msg = f"端口 {args.port} 启动失败: {exc}\n换个端口试试：python server.py --port 8766"
+        print(msg)
+        if hidden:
+            msgbox(msg)
+        return 1
+    if actual_port != args.port:
+        log(f"端口 {args.port} 被占用，已改用 {actual_port}")
+
+    ips = lan_ips() or ["<本机IP>"]
+    lines = ["", "  PadTrack 已启动", "  " + "-" * 52]
+    for ip in ips:
+        lines.append(f"  平板浏览器打开:  http://{ip}:{actual_port}/?k={KEY}")
+    lines += [
+        f"  本机自测:        http://127.0.0.1:{actual_port}/?k={KEY}",
+        "  " + "-" * 52,
+        "  同一 WiFi 即可；连不上先看 Windows 防火墙是否放行。",
+        "  按 Ctrl+C 停止。",
+        "",
+    ]
+    print("\n".join(lines), flush=True)
+    write_address(actual_port, ips)
+    try:
+        with open(PID_PATH, "w", encoding="utf-8") as f:
+            f.write(f"{os.getpid()} {actual_port}")
+    except OSError:
+        pass
+
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止。")
+    finally:
+        srv.server_close()
+        try:
+            os.remove(PID_PATH)
+        except OSError:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
