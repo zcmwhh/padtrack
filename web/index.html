@@ -1050,6 +1050,11 @@
   /* ---------------- 顶部媒体控制（所有模式可见） ---------------- */
   document.querySelectorAll('#island button').forEach((b) => {
     b.addEventListener('click', () => {
+      if (b.dataset.media === '179') {           // 播放/暂停：先翻图标，别等轮询
+        uiPaused = !uiPaused;
+        paintPlayIcon();
+        iconLockUntil = performance.now() + 2500;
+      }
       send({ t: 'k', vk: parseInt(b.dataset.media, 10) });   // 系统媒体键
       b.classList.add('on');
       setTimeout(() => b.classList.remove('on'), 160);
@@ -1128,6 +1133,13 @@
   const lyricInner = document.getElementById('lyricInner');
 
   let lastMedia = '';
+  let uiPaused = false;          // 界面认为当前是否暂停
+  let iconLockUntil = 0;         // 刚点过按钮的一小段时间内不被轮询覆盖
+
+  function paintPlayIcon() {
+    const ico = uiPaused ? SVG_PLAY : SVG_PAUSE;
+    document.querySelectorAll('#island [data-media="179"]').forEach((b) => { b.innerHTML = ico; });
+  }
   let changeAt = 0;      // 发现切歌的时刻，用来补上抓取封面歌词那段时间
   let lyricOffset = parseFloat(localStorage.getItem('padtrackLyricOffset') || '0') || 0;
   let lyricLines = [], lyricBase = 0, lyricClock = 0;
@@ -1297,8 +1309,8 @@
       mShuffle = typeof d.shuffle === 'boolean' ? d.shuffle : null;
       mRepeat = typeof d.repeat === 'number' ? d.repeat : null;
       paintModes();
-      const ico = paused ? SVG_PLAY : SVG_PAUSE;
-      document.querySelectorAll('#island [data-media="179"]').forEach((b) => { b.innerHTML = ico; });
+      uiPaused = paused;
+      if (performance.now() > iconLockUntil) paintPlayIcon();
     } catch (_) {}
   }
   pollMedia();
