@@ -640,20 +640,8 @@ def split_song_title(raw):
     return t.strip(), ""
 
 
-# 歌词开头的制作人员信息：必须"关键词 + 冒号"才算，正常歌词不会这样开头
-_META_LINE = re.compile(
-    r"^\s*(制作人|作词|作曲|编曲|混音|母带|录音|监制|监製|和声|配唱|制作|出品|发行|策划|统筹"
-    r"|吉他|贝斯|鼓|键盘|弦乐|人声|调声|调校|原唱|翻唱"
-    r"|作詞|編曲|ミックス|マスタリング|レコーディング|プロデュース|アレンジ"
-    r"|lyrics?|composed?|composer|arranged?|arranger|produced?|producer"
-    r"|mixed?|mastered?|written|music)"
-    r"\s*(by)?\s*[:：]",
-    re.I,
-)
-
-
 def parse_lrc(text):
-    """把 LRC 文本解析成 [[秒, 歌词], ...]（去掉制作人员信息）。"""
+    """把 LRC 文本解析成 [[秒, 歌词], ...]。"""
     out = []
     for raw in (text or "").splitlines():
         line = raw.strip()
@@ -664,8 +652,6 @@ def parse_lrc(text):
             continue
         mm, ss, words = m.group(1), m.group(2).replace(":", "."), m.group(3).strip()
         if not words:
-            continue
-        if _META_LINE.match(words):
             continue
         try:
             sec = int(mm) * 60 + float(ss)
@@ -745,15 +731,11 @@ def query_now():
             if t:
                 _note_track(t, a)
                 playing = session_active(exe)
-                # 刚换歌的几秒里播放器在加载，别把空档当成暂停（这只影响界面状态）
-                shown = playing
+                # 刚换歌的几秒里播放器在加载，别把空档当成暂停
                 if playing is False and _just_switched():
-                    shown = True
+                    playing = True
                 data = {"title": t, "artist": a,
-                        "status": "Paused" if shown is False else "Playing",
-                        # audible 是"真的有没有声音"，客户端用它驱动歌词时钟，
-                        # 不受上面的宽限期影响
-                        "audible": None if playing is None else bool(playing)}
+                        "status": "Paused" if playing is False else "Playing"}
     except Exception:
         pass
 
@@ -958,12 +940,10 @@ def _probe_player():
         if t:
             _note_track(t, a)
             playing = session_active(exe)
-            shown = playing
             if playing is False and _just_switched():
-                shown = True
+                playing = True
             data = {"title": t, "artist": a,
-                    "status": "Paused" if shown is False else "Playing",
-                    "audible": None if playing is None else bool(playing)}
+                    "status": "Paused" if playing is False else "Playing"}
 
     # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
     if not data.get("title"):

@@ -266,36 +266,6 @@
 
   let lastMedia = '';
   let uiPaused = false;          // 界面认为当前是否暂停
-  let songStartPending = false;  // 这首歌还没真正开始过（用于起步补偿）
-  let fastPollUntil = 0;         // 切歌后的一小段高频轮询窗口
-  let songAudibleAt = 0;         // 当前这首曲真正开始出声的时刻（performance.now）
-
-  // 这首曲从出声到现在过了多少秒（歌词晚到时用来补基准）
-  function audibleElapsed(nowMs) {
-    return songAudibleAt ? Math.max(0, (nowMs - songAudibleAt) / 1000) : 0;
-  }
-
-  // 歌词时钟只跟「真的有没有声音」走：没声音（加载/暂停/卡顿）就冻住
-  function applyAudible(audible, nowMs) {
-    if (audible === null) return;
-    if (performance.now() < iconLockUntil) return;   // 刚点过按钮，以用户操作为准
-    if (audible && !songAudibleAt && !uiPaused) songAudibleAt = nowMs;
-    if (!audible && lyricPlaying) {
-      lyricBase = lyricTime();
-      lyricPlaying = false;
-      lyricClock = nowMs;
-      anchorAt(nowMs);
-    } else if (audible && !lyricPlaying && !uiPaused) {
-      lyricClock = nowMs;
-      if (songStartPending) {
-        // 每秒采样最多晚不到 1 拍，补回半拍
-        lyricBase += 0.3;
-        songStartPending = false;
-      }
-      lyricPlaying = true;
-      anchorAt(nowMs);
-    }
-  }
   let iconLockUntil = 0;         // 刚点过按钮的一小段时间内不被轮询覆盖
 
   let paintedPaused = null;
@@ -377,25 +347,16 @@
       if (lyricLines[i][0] <= t) idx = i;
       else break;
     }
-    if (idx === lyricActive && !force && lyricInner.style.transform) return;
+    if (idx === lyricActive && !force) return;
     lyricActive = idx;
 
     // 左侧滚动栏
     const items = lyricInner.children;
-    for (let i = 0; i < items.length; i++) {
-      items[i].classList.toggle('active', i === idx);
-      // 前奏阶段没有高亮行，把第一句标成「待唱」，别让画面空着
-      items[i].classList.toggle('pending', idx < 0 && i === 0);
-    }
-    // 还没到第一句（新歌前奏）时 idx = -1：这时把第一句居中摆放，
-    // 否则容器会保留上一首的位移，新歌词直接被顶出画面，看起来像"高亮没了"。
-    const target = idx >= 0 ? items[idx] : items[0];
-    if (target) {
+    for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
+    if (idx >= 0 && items[idx]) {
       const h = lyricsEl.clientHeight;
-      // 用目标行的真实布局位置居中。歌词折行时每行高度不同，
-      // 按「行号 × 行高」算会越滚越偏（高亮行慢慢飘出屏幕）。
-      const y = target.offsetTop + target.offsetHeight / 2;
-      lyricInner.style.transform = `translateY(${Math.round(h / 2 - y)}px)`;
+      const lh = items[0].offsetHeight || 33;
+      lyricInner.style.transform = `translateY(${Math.round(h / 2 - (idx * lh + lh / 2))}px)`;
     }
   }
 
@@ -483,14 +444,21 @@
       const paused = d.status === 'Paused';
 
       if (songKey !== lyricSongKey) {
-        // 基准 = 这首歌真正已经播了多久：
-        // 播放器给得出位置就用它，否则用「从听到声音到现在」（不含加载耗时）
-        const base = typeof d.pos === 'number' ? d.pos : audibleElapsed(nowMs);
+        // 起始点：播放器给了真实进度就用它；否则用「上一首的结束时间」推算。
+        // 顺序播放时上一首放完正好接下一首，这样切歌瞬间就能对上。
+        let base = typeof d.pos === 'number' ? d.pos : 0;
+        if (typeof d.pos !== 'number' && prevDur > 0 && prevAnchor > 0) {
+          const predictedEnd = prevAnchor + prevDur * 1000;
+          const late = nowMs - predictedEnd;
+          // 正常两首之间只差 0~1.5 秒；算出好几秒的「迟到」一定是基准错了，宁可不用
+          if (late > -3000 && late < 4000) base = Math.max(0, late / 1000);
+        }
+        // 没有上一首可推算时（手动点播/跳过），至少把「从发现到拿到歌词」这段补上
+        if (typeof d.pos !== 'number' && changeAt) {
+          base = Math.max(base, (nowMs - changeAt) / 1000 + 0.5);   // +0.5 是轮询的平均发现延迟
+        }
         lyricSongKey = songKey;
-        lyricPlaying = false;          // 先冻住，等 audible
-        songAudibleAt = 0;             // 新歌，等它真正出声再记
-        songStartPending = true;
-        fastPollUntil = nowMs + 6000;  // 接下来 6 秒高频问一次，尽快发现出声
+        lyricPlaying = !paused;
         setLyrics(d.lyric, base);
         anchorAt(nowMs);
       } else {
@@ -502,8 +470,7 @@
         }
         // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
         if (!lyricLines.length && d.lyric && d.lyric.length) {
-          // 歌词比声音晚到：把这段时间补进基准，否则会一直落后
-          setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : audibleElapsed(nowMs));
+          setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
           anchorAt(nowMs);
         }
       }
@@ -512,13 +479,19 @@
       mRepeat = typeof d.repeat === 'number' ? d.repeat : null;
       paintModes();
 
-      // 歌词时钟以「真的有没有声音」为准：加载中、暂停、卡顿都停住，
-      // 这样不会把等待时间算成歌曲进度。
-      // audible 为 null 表示拿不到音频电平（没装 pycaw），这时退回用播放状态
-      let audible = d.audible === true ? true : (d.audible === false ? false : null);
-      if (audible === null) audible = !paused;
-      applyAudible(audible, nowMs);
+      // 刚点过按钮的那 2.5 秒内，以用户的操作意图为准：
+      // 否则服务端还没跟上（电平要静音 0.45 秒才判定）时会把状态覆盖回去，图标就会来回弹。
       if (performance.now() > iconLockUntil) {
+        if (paused && lyricPlaying) {
+          lyricBase = lyricTime();
+          lyricPlaying = false;
+          lyricClock = nowMs;
+          anchorAt(nowMs);
+        } else if (!paused && !lyricPlaying) {
+          lyricClock = nowMs;
+          lyricPlaying = true;
+          anchorAt(nowMs);          // 恢复时也要重锚，否则暂停的时长会被算进基准
+        }
         uiPaused = paused;
         paintPlayIcon();
       }
@@ -707,16 +680,11 @@
       const r = await fetch(`/now?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();
-      // 时钟启停跟着这个 1 秒一次的快速轮询走，别等 3 秒一次的 /media
-      applyAudible(d.audible === true ? true : (d.audible === false ? false : null),
-                   performance.now());
       const k = (d.title || '') + '|' + (d.status || '');
       if (k !== nowKey) { nowKey = k; lastMedia = ''; changeAt = performance.now(); pollMedia(true); }
     } catch (_) {}
   }
   setInterval(pollNow, 1000);
-  // 切歌后的 6 秒里用 350ms 轮询，让歌词尽快起步
-  setInterval(() => { if (performance.now() < fastPollUntil) pollNow(); }, 350);
   function paintProgress() {
     if (!songDur) { musicProg.style.width = '0%'; return; }
     const t = lyricTime();
