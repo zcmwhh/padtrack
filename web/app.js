@@ -726,6 +726,22 @@
       '\n' + (lyricSongKey || '-');
   }, 250);
 
+  // 把当前偏移显示出来（设置面板 + 左上角角标）
+  const lyrOffVal = document.getElementById('lyrOffVal');
+  const offBadge = document.getElementById('offBadge');
+  function paintOffset() {
+    const v = Math.round(lyricOffset * 10) / 10;
+    const txt = v === 0 ? '0 秒' : (v > 0 ? '+' : '') + v + ' 秒';
+    if (lyrOffVal) {
+      lyrOffVal.textContent = txt;
+      lyrOffVal.classList.toggle('on', v !== 0);
+    }
+    if (offBadge) {
+      offBadge.textContent = v === 0 ? '' : '歌词偏移 ' + txt;
+      offBadge.classList.toggle('on', v !== 0);
+    }
+  }
+
   // 手动微调歌词进度：打开页面时歌已经在播一半，就靠这个对齐
   function nudgeLyric(sec) {
     lyricOffset = Math.round((lyricOffset + sec) * 10) / 10;
@@ -734,9 +750,12 @@
     lyricBase = Math.max(0, lyricTime() + sec);
     lyricClock = performance.now();
     paintLyric(true);
+    paintOffset();
     const dir = sec > 0 ? '快进' : '后退';
     flash('歌词' + dir + ' ' + Math.abs(sec) + ' 秒（累计 ' + lyricOffset + '）');
   }
+  paintOffset();
+
   const buildLine = document.getElementById('buildLine');
   if (buildLine) {
     const t = new Date(performance.timeOrigin || Date.now());
@@ -759,8 +778,16 @@
   document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
   document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
   document.getElementById('lyrReset').addEventListener('click', () => {
+    const before = lyricOffset;
     lyricOffset = 0;
     localStorage.setItem('padtrackLyricOffset', '0');
+    paintOffset();
+    // 之前只改了变量，当前这首歌要等到下一首才正确，这里立刻拉回来
+    if (before && lyricLines.length) {
+      lyricBase = Math.max(0, lyricBase - before);
+      lyricClock = performance.now();
+      paintLyric(true);
+    }
     flash('歌词偏移已清零');
   });
 

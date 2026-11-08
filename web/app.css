@@ -52,6 +52,17 @@
   }
   #dot { width: 8px; height: 8px; border-radius: 50%; background: #d9534f; transition: background .3s; }
   #dot.on { background: #3ecf8e; box-shadow: 0 0 8px rgba(62, 207, 142, .8); }
+  /* 歌词偏移不为 0 时才出现：偏移是全局的，忘了就会以为歌词一直错位 */
+  .offbadge {
+    display: none;
+    padding: 1px 8px; border-radius: 999px;
+    background: rgba(255, 176, 68, .16); color: #ffb044;
+    border: 1px solid rgba(255, 176, 68, .38);
+    font-size: 12px; font-weight: 600; letter-spacing: .2px;
+  }
+  .offbadge.on { display: inline-block; }
+  .offval { color: #9fb0c2; font-weight: 600; margin-right: 2px; }
+  .offval.on { color: #ffb044; }
 
   #tip {
     z-index: 90;

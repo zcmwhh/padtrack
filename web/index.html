@@ -17,7 +17,7 @@
   </div>
 </div>
 
-<div id="hud"><span id="dot"></span><span id="lat">连接中…</span></div>
+<div id="hud"><span id="dot"></span><span id="lat">连接中…</span><span id="offBadge" class="offbadge"></span></div>
 <div id="tip"></div>
 
 <div id="island" class="hidden">
@@ -86,6 +86,7 @@
   <div class="row"><span>全屏</span><button class="round" id="full" style="width:40px;height:40px;font-size:15px">⛶</button></div>
   <div class="row">
     <span>歌词同步</span>
+    <b id="lyrOffVal" class="offval">0 秒</b>
     <button class="mini" id="lyrBack">−5 秒</button>
     <button class="mini" id="lyrFwd">+5 秒</button>
     <button class="mini" id="lyrReset">清零</button>
