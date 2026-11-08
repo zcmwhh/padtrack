@@ -453,21 +453,12 @@
       const paused = d.status === 'Paused';
 
       if (songKey !== lyricSongKey) {
-        // 起始点：播放器给了真实进度就用它；否则用「上一首的结束时间」推算。
-        // 顺序播放时上一首放完正好接下一首，这样切歌瞬间就能对上。
-        let base = typeof d.pos === 'number' ? d.pos : 0;
-        if (typeof d.pos !== 'number' && prevDur > 0 && prevAnchor > 0) {
-          const predictedEnd = prevAnchor + prevDur * 1000;
-          const late = nowMs - predictedEnd;
-          // 正常两首之间只差 0~1.5 秒；算出好几秒的「迟到」一定是基准错了，宁可不用
-          if (late > -3000 && late < 4000) base = Math.max(0, late / 1000);
-        }
-        // 没有上一首可推算时（手动点播/跳过），至少把「从发现到拿到歌词」这段补上
-        if (typeof d.pos !== 'number' && changeAt) {
-          base = Math.max(base, (nowMs - changeAt) / 1000 + 0.5);   // +0.5 是轮询的平均发现延迟
-        }
+        // 新歌一律从 0 开始，真正开始走是「听到声音」那一刻。
+        // 以前用「发现切歌到现在过了多久」估算，赶上加载慢的歌，
+        // 加载的几秒会被算进歌词，一开头就领先好几秒。
+        const base = typeof d.pos === 'number' ? d.pos : 0;
         lyricSongKey = songKey;
-        lyricPlaying = !paused;
+        lyricPlaying = false;          // 先冻住，等 audible
         setLyrics(d.lyric, base);
         anchorAt(nowMs);
       } else {
@@ -488,18 +479,23 @@
       mRepeat = typeof d.repeat === 'number' ? d.repeat : null;
       paintModes();
 
-      // 刚点过按钮的那 2.5 秒内，以用户的操作意图为准：
-      // 否则服务端还没跟上（电平要静音 0.45 秒才判定）时会把状态覆盖回去，图标就会来回弹。
+      // 歌词时钟以「真的有没有声音」为准：加载中、暂停、卡顿都停住，
+      // 这样不会把等待时间算成歌曲进度。
+      // audible 为 null 表示拿不到音频电平（没装 pycaw），这时退回用播放状态
+      let audible = d.audible === true ? true : (d.audible === false ? false : null);
+      if (audible === null) audible = !paused;
       if (performance.now() > iconLockUntil) {
-        if (paused && lyricPlaying) {
+        if (audible === false && lyricPlaying) {
           lyricBase = lyricTime();
           lyricPlaying = false;
           lyricClock = nowMs;
           anchorAt(nowMs);
-        } else if (!paused && !lyricPlaying) {
+        } else if (audible === true && !lyricPlaying && !paused) {
           lyricClock = nowMs;
+          // 上一次采样可能最多晚了 1 秒才发现有声音，补半个轮询间隔
+          lyricBase += 0.5;
           lyricPlaying = true;
-          anchorAt(nowMs);          // 恢复时也要重锚，否则暂停的时长会被算进基准
+          anchorAt(nowMs);
         }
         uiPaused = paused;
         paintPlayIcon();

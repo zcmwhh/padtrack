@@ -731,11 +731,15 @@ def query_now():
             if t:
                 _note_track(t, a)
                 playing = session_active(exe)
-                # 刚换歌的几秒里播放器在加载，别把空档当成暂停
+                # 刚换歌的几秒里播放器在加载，别把空档当成暂停（这只影响界面状态）
+                shown = playing
                 if playing is False and _just_switched():
-                    playing = True
+                    shown = True
                 data = {"title": t, "artist": a,
-                        "status": "Paused" if playing is False else "Playing"}
+                        "status": "Paused" if shown is False else "Playing",
+                        # audible 是"真的有没有声音"，客户端用它驱动歌词时钟，
+                        # 不受上面的宽限期影响
+                        "audible": None if playing is None else bool(playing)}
     except Exception:
         pass
 
@@ -940,10 +944,12 @@ def _probe_player():
         if t:
             _note_track(t, a)
             playing = session_active(exe)
+            shown = playing
             if playing is False and _just_switched():
-                playing = True
+                shown = True
             data = {"title": t, "artist": a,
-                    "status": "Paused" if playing is False else "Playing"}
+                    "status": "Paused" if shown is False else "Playing",
+                    "audible": None if playing is None else bool(playing)}
 
     # 2) 窗口这条路拿不到（Spotify 这种标题里没歌名的），再问系统媒体控制
     if not data.get("title"):
