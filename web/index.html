@@ -254,6 +254,103 @@
   /* 收起态的律动条稍微往里挪，和整体留白一致 */
   .isle-wave { margin-right: 2px; }
 
+
+  /* ---------------- 可拖动的进度条 ---------------- */
+  .isle-bar {
+    position: relative; height: 16px; margin-top: 1px;
+    display: flex; align-items: center; cursor: pointer;
+    touch-action: none;
+  }
+  .isle-bar::before {
+    content: ''; position: absolute; left: 0; right: 0; height: 4px;
+    border-radius: 2px; background: rgba(120, 150, 180, .2);
+  }
+  .isle-bar i {
+    position: relative; height: 4px; width: 0%; border-radius: 2px;
+    background: linear-gradient(90deg, #5eb8ff, #6ee7b7);
+    transition: width .55s linear;
+    pointer-events: none;
+  }
+  .isle-bar.dragging i { transition: none; }
+  .isle-bar::after {
+    content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    background: #eaf2f8; box-shadow: 0 0 10px rgba(110, 231, 183, .6);
+    left: calc(var(--p, 0) * 1% - 6px); opacity: 0;
+    transition: opacity .2s ease, transform .2s var(--ease-spring);
+    transform: scale(.6); pointer-events: none;
+  }
+  .isle-bar.dragging::after, .isle-bar:hover::after { opacity: 1; transform: scale(1); }
+
+  /* ---------------- 歌单抽屉 ---------------- */
+  #sheetMask {
+    position: fixed; inset: 0; z-index: 80; background: rgba(5, 8, 12, .5);
+    opacity: 0; pointer-events: none;
+    transition: opacity .35s var(--ease-out);
+    backdrop-filter: blur(2px);
+  }
+  #sheetMask.on { opacity: 1; pointer-events: auto; }
+
+  #plSheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 81;
+    height: min(74vh, 620px);
+    display: flex; flex-direction: column;
+    background: #0d1319;
+    border-top: 1px solid rgba(120, 150, 180, .16);
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -20px 50px rgba(0, 0, 0, .5);
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+    transform: translateY(102%);
+    transition: transform .52s var(--ease-spring);
+  }
+  #plSheet.on { transform: translateY(0); }
+
+  .sheet-head {
+    position: relative;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0 10px;
+    font-size: 13px; color: #9fb0c2;
+  }
+  .sheet-head::before {
+    content: ''; position: absolute; left: 50%; top: 0;
+    transform: translateX(-50%);
+    width: 38px; height: 4px; border-radius: 2px;
+    background: rgba(120, 150, 180, .28);
+  }
+  .sheet-head span { font-weight: 600; color: #dbe7f3; font-size: 14px; }
+  .sheet-head button { margin-left: auto; }
+
+  #plChips {
+    display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px;
+    scrollbar-width: none;
+  }
+  #plChips::-webkit-scrollbar { display: none; }
+  #plChips button {
+    flex: none; padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
+    background: rgba(30, 41, 54, .8); border: 1px solid rgba(120, 150, 180, .14);
+    color: #a9bacb; transition: all .22s var(--ease-spring);
+  }
+  #plChips button.on {
+    background: rgba(62, 207, 142, .16); border-color: rgba(62, 207, 142, .5);
+    color: #8fe3bd; transform: scale(1.02);
+  }
+
+  #plList { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .trk {
+    display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+    border-bottom: 1px solid rgba(120, 150, 180, .07);
+    animation: trkIn .42s var(--ease-out) both;
+  }
+  @keyframes trkIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .trk .idx { width: 26px; text-align: right; font-size: 12px; color: #5d6b7a; flex: none; }
+  .trk .meta2 { flex: 1; min-width: 0; }
+  .trk .nm { font-size: 13.5px; color: #dfe9f3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trk .ar { font-size: 11.5px; color: #6f8194; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trk .du { font-size: 11.5px; color: #5d6b7a; flex: none; }
+  .trk.now .nm { color: #6ee7b7; font-weight: 600; }
+  .trk.now .idx { color: #6ee7b7; }
+
+  #plEmpty { text-align: center; color: #5d6b7a; font-size: 13px; padding: 40px 0; }
+
   /* 尊重系统的「减少动态效果」 */
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -588,9 +685,10 @@
     <div class="isle-meta">
       <div id="musicTitleFull">—</div>
       <div id="musicArtist"></div>
-      <div class="isle-bar"><i id="musicProg"></i></div>
+      <div class="isle-bar" id="seekBar"><i id="musicProg"></i></div>
     </div>
     <div class="isle-ctrl">
+      <button id="plBtn" aria-label="歌单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="18.5" cy="15.5" r="2.2"/><path d="M20.7 15.5V8.4l-4 1"/></svg></button>
       <button data-media="177" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6.2 9.4 12 19 17.8z" fill="currentColor"/></svg></button>
       <button data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
       <button data-media="176" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 6.2 14.6 12 5 17.8z" fill="currentColor"/></svg></button>
@@ -600,6 +698,13 @@
 
 <div id="numpad"></div>
 <div id="lyrics"><div id="lyricInner"></div></div>
+
+<div id="sheetMask"></div>
+<div id="plSheet">
+  <div class="sheet-head"><span>歌单</span><button class="mini" id="plClose">收起</button></div>
+  <div id="plChips"></div>
+  <div id="plList"><div id="plEmpty">正在读取网易云歌单…</div></div>
+</div>
 <div id="syncbox" style="display:none;position:fixed;left:8px;bottom:8px;z-index:999;font:12px/1.5 ui-monospace,monospace;color:#8fe3bd;background:rgba(0,0,0,.72);padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre"></div>
 
 <div class="topbar">
@@ -1023,6 +1128,159 @@
   }
   pollMedia();
   setInterval(pollMedia, 3000);
+
+
+  /* ---------------- 进度条拖动跳转 ---------------- */
+  const seekBar = document.getElementById('seekBar');
+  let seekDrag = false;
+
+  function barRatio(e) {
+    const r = seekBar.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+  }
+
+  function paintSeek(ratio) {
+    musicProg.style.width = (ratio * 100).toFixed(1) + '%';
+    seekBar.style.setProperty('--p', (ratio * 100).toFixed(1));
+  }
+
+  seekBar.addEventListener('pointerdown', (e) => {
+    if (!songDur) { flash('还没拿到歌曲时长'); return; }
+    e.stopPropagation();
+    seekDrag = true;
+    seekBar.classList.add('dragging');
+    try { seekBar.setPointerCapture(e.pointerId); } catch (_) {}
+    paintSeek(barRatio(e));
+  });
+
+  seekBar.addEventListener('pointermove', (e) => {
+    if (!seekDrag) return;
+    e.stopPropagation();
+    paintSeek(barRatio(e));
+  });
+
+  seekBar.addEventListener('pointerup', async (e) => {
+    if (!seekDrag) return;
+    e.stopPropagation();
+    seekDrag = false;
+    seekBar.classList.remove('dragging');
+    const target = barRatio(e) * songDur;
+    try {
+      const r = await fetch(`/seek?k=${encodeURIComponent(KEY)}&pos=${target.toFixed(1)}`,
+        { cache: 'no-store' });
+      const d = await r.json();
+      if (d && d.ok) {
+        lyricBase = target;
+        lyricClock = performance.now();
+        songAnchor = lyricClock - target * 1000;
+        paintLyric(true);
+        flash('跳到 ' + fmtTime(target));
+      } else {
+        flash(d && d.reason === 'no-session' ? '这个播放器不支持跳转' : '跳转失败');
+        paintProgress();
+      }
+    } catch (_) {
+      paintProgress();
+    }
+  });
+
+  function fmtTime(sec) {
+    sec = Math.max(0, Math.round(sec));
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  /* ---------------- 歌单抽屉 ---------------- */
+  const plSheet = document.getElementById('plSheet');
+  const sheetMask = document.getElementById('sheetMask');
+  const plChips = document.getElementById('plChips');
+  const plList = document.getElementById('plList');
+  let plLoaded = false, plCurrent = '';
+
+  function openSheet() {
+    plSheet.classList.add('on');
+    sheetMask.classList.add('on');
+    collapsePlayer();
+    if (!plLoaded) { plLoaded = true; loadPlaylists(); }
+  }
+  function closeSheet() {
+    plSheet.classList.remove('on');
+    sheetMask.classList.remove('on');
+  }
+
+  async function loadPlaylists() {
+    try {
+      const r = await fetch(`/playlists?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const list = await r.json();
+      plChips.innerHTML = '';
+      if (!Array.isArray(list) || !list.length) {
+        plList.innerHTML = '<div id="plEmpty">没读到网易云的歌单目录</div>';
+        return;
+      }
+      list.forEach((p, i) => {
+        const b = document.createElement('button');
+        b.textContent = p.name;
+        b.dataset.id = p.id;
+        b.addEventListener('click', () => selectPlaylist(p.id, b));
+        plChips.appendChild(b);
+        if (i === 0) setTimeout(() => selectPlaylist(p.id, b), 80);
+      });
+    } catch (_) {
+      plList.innerHTML = '<div id="plEmpty">读取失败</div>';
+    }
+  }
+
+  async function selectPlaylist(pid, btn) {
+    plCurrent = pid;
+    [...plChips.children].forEach((b) => b.classList.toggle('on', b === btn));
+    plList.innerHTML = '<div id="plEmpty">读取中…</div>';
+    try {
+      const r = await fetch(`/playlist?k=${encodeURIComponent(KEY)}&id=${encodeURIComponent(pid)}`,
+        { cache: 'no-store' });
+      const tracks = await r.json();
+      plList.innerHTML = '';
+      if (!Array.isArray(tracks) || !tracks.length) {
+        plList.innerHTML = '<div id="plEmpty">这个歌单是空的</div>';
+        return;
+      }
+      tracks.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'trk' + (t.name === musicTitle.textContent ? ' now' : '');
+        row.style.animationDelay = Math.min(i * 18, 260) + 'ms';
+        const idx = document.createElement('div');
+        idx.className = 'idx';
+        idx.textContent = String(i + 1);
+        const meta = document.createElement('div');
+        meta.className = 'meta2';
+        const nm = document.createElement('div');
+        nm.className = 'nm';
+        nm.textContent = t.name || '(未知)';
+        const ar = document.createElement('div');
+        ar.className = 'ar';
+        ar.textContent = t.artist || '';
+        meta.appendChild(nm);
+        meta.appendChild(ar);
+        const du = document.createElement('div');
+        du.className = 'du';
+        du.textContent = t.dur ? fmtTime(t.dur) : '';
+        row.appendChild(idx);
+        row.appendChild(meta);
+        row.appendChild(du);
+        row.addEventListener('click', () => {
+          flash('《' + (t.name || '') + '》无法从 PadTrack 点播');
+        });
+        plList.appendChild(row);
+      });
+    } catch (_) {
+      plList.innerHTML = '<div id="plEmpty">读取失败</div>';
+    }
+  }
+
+  document.getElementById('plBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openSheet();
+  });
+  document.getElementById('plClose').addEventListener('click', closeSheet);
+  sheetMask.addEventListener('click', closeSheet);
 
   // 快速探测：每秒问一次「现在放的是哪首」，切歌能立刻发现
   let nowKey = '';

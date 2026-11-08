@@ -596,6 +596,145 @@ def query_now():
     return data
 
 
+SEARCH_PS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+})[0]
+function Await($op, $t) {
+  $m = $gen.MakeGenericMethod($t)
+  $task = $m.Invoke($null, @($op))
+  $task.Wait(-1) | Out-Null
+  $task.Result
+}
+[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+$s = $mgr.GetCurrentSession()
+if ($null -eq $s) { '{"ok":false,"reason":"no-session"}'; exit }
+$ticks = [long]([double]::Parse($args[0]) * 10000000)
+$ok = Await ($s.TryChangePlaybackPositionAsync($ticks)) ([bool])
+@{ ok = [bool]$ok } | ConvertTo-Json -Compress
+"""
+
+
+def seek_to(seconds):
+    """把当前播放位置跳到指定秒数。只有支持系统媒体控制的播放器才行。"""
+    try:
+        script = os.path.join(tempfile.gettempdir(), "padtrack_seek.ps1")
+        if not os.path.exists(script):
+            with open(script, "w", encoding="utf-8") as f:
+                f.write(SEARCH_PS)
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+             str(float(seconds))],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=8, creationflags=0x08000000,
+        ).stdout.strip()
+        for line in reversed(out.splitlines()):
+            line = line.strip()
+            if line.startswith("{") and line.endswith("}"):
+                return json.loads(line)
+    except Exception:
+        pass
+    return {"ok": False, "reason": "error"}
+
+
+def _ne_db_path():
+    base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "NetEase", "CloudMusic", "Library")
+    p = os.path.join(base, "webdb.dat")
+    return p if os.path.exists(p) else ""
+
+
+def netease_playlists():
+    """读取网易云本地库里的歌单列表（只读）。"""
+    path = _ne_db_path()
+    if not path:
+        return []
+    try:
+        import sqlite3
+        uri = "file:" + path.replace("\\", "/") + "?mode=ro&immutable=1"
+        con = sqlite3.connect(uri, uri=True, timeout=3)
+        out = []
+        seen = set()
+        for pid, js in con.execute("select id, jsonStr from historyPlaylists order by playtime desc limit 30"):
+            try:
+                d = json.loads(js)
+            except Exception:
+                continue
+            if not isinstance(d, dict):
+                continue
+            seen.add(str(d.get("id") or pid))
+            out.append({
+                "id": str(d.get("id") or pid),
+                "name": d.get("name") or "未命名歌单",
+                "cover": d.get("coverImgUrl") or "",
+            })
+        for (pid,) in con.execute("select id from playlistTrackIds"):
+            pid = str(pid)
+            if pid in seen or pid.startswith("dailyRecommend"):
+                continue
+            seen.add(pid)
+            out.append({"id": pid, "name": "歌单 " + pid[-4:], "cover": ""})
+        con.close()
+        return out
+    except Exception:
+        return []
+
+
+def netease_playlist_tracks(pid, limit=120):
+    """某个歌单里的曲目（曲名从 dbTrack 里解析）。"""
+    path = _ne_db_path()
+    if not path or not pid:
+        return []
+    try:
+        import sqlite3
+        uri = "file:" + path.replace("\\", "/") + "?mode=ro&immutable=1"
+        con = sqlite3.connect(uri, uri=True, timeout=3)
+        js = con.execute("select jsonStr from playlistTrackIds where id = ?", (pid,)).fetchone()
+        if not js:
+            con.close()
+            return []
+        ids = []
+        try:
+            for item in (json.loads(js[0]).get("trackIds") or []):
+                sid = str(item.get("id") if isinstance(item, dict) else item)
+                if sid:
+                    ids.append(sid)
+        except Exception:
+            pass
+
+        out = []
+        for sid in ids[:limit]:
+            row = con.execute("select jsonStr from dbTrack where id = ?", (sid,)).fetchone()
+            if not row:
+                out.append({"id": sid, "name": "(未缓存)", "artist": "", "dur": 0})
+                continue
+            try:
+                d = json.loads(row[0])
+            except Exception:
+                continue
+            artists = d.get("artists") or d.get("ar") or []
+            names = []
+            if isinstance(artists, list):
+                for a in artists:
+                    if isinstance(a, dict) and a.get("name"):
+                        names.append(a["name"])
+            album = d.get("album") or d.get("al") or {}
+            out.append({
+                "id": sid,
+                "name": d.get("name") or "",
+                "artist": "/".join(names),
+                "album": album.get("name") if isinstance(album, dict) else "",
+                "dur": round((d.get("duration") or 0) / 1000.0, 1),
+            })
+        con.close()
+        return out
+    except Exception:
+        return []
+
+
 def query_media(force=False):
     """当前播放曲目，带 2.5 秒缓存；force=True 时跳过缓存（切歌瞬间用）。"""
     if not force and time.time() - _media_cache["t"] < 2.5:
@@ -720,6 +859,35 @@ class Handler(socketserver.BaseRequestHandler):
                     self._http(sock, 403, b"{}", "application/json")
                     return
                 body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/playlists":
+                if key != KEY:
+                    self._http(sock, 403, b"[]", "application/json")
+                    return
+                body = json.dumps(netease_playlists(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/playlist":
+                if key != KEY:
+                    self._http(sock, 403, b"[]", "application/json")
+                    return
+                pid = params.get("id", [""])[0]
+                body = json.dumps(netease_playlist_tracks(pid), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/seek":
+                if key != KEY:
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                try:
+                    pos = float(params.get("pos", ["0"])[0])
+                except ValueError:
+                    pos = 0.0
+                body = json.dumps(seek_to(pos), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
