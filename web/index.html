@@ -614,7 +614,7 @@
   <div class="row"><span>指针加速</span><input type="checkbox" id="accel"></div>
   <div class="row"><span>自然滚动（手指推内容）</span><input type="checkbox" id="natural"></div>
   <div class="row"><span>线性绝对定位</span><input type="checkbox" id="absmode"></div>
-  <div class="row"><span>全屏</span><button class="round" id="full" style="width:40px;height:40px;font-size:15px">⛶</button></div>
+  <div class="row"><span>全屏</span><span class="val" style="font-size:12px;opacity:.62;text-align:right;line-height:1.5">用浏览器菜单里的「全屏」</span></div>
   <div class="row">
     <span>歌词同步</span>
     <button class="mini" id="lyrBack">−5 秒</button>
@@ -1388,13 +1388,6 @@
     panel.classList.toggle('open');
   });
 
-  document.getElementById('full').addEventListener('click', () => {
-    // 让 body 全屏而不是 <html>：全屏元素之外的区域由 ::backdrop 接管，
-    // 可以刷成主题色，避免设备在左侧留出黑色安全边
-    if (!document.fullscreenElement) document.body.requestFullscreen?.().catch(() => {});
-    else document.exitFullscreen?.();
-    setTimeout(() => { if (document.fullscreenElement) document.body.style.background = '#0d1117'; }, 60);
-  });
   pad.addEventListener('pointerdown', () => { if (panel.classList.contains('open')) panel.classList.remove('open'); }, true);
 
   /* ---------------- 键盘（走电脑输入法） ---------------- */
