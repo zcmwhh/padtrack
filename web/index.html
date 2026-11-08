@@ -13,6 +13,7 @@
   }
   /* 全屏时浏览器给元素留的边也上色，避免出现黑条 */
   :fullscreen { background: #0d1117 !important; }
+  body:fullscreen { width: 100vw; height: 100vh; background: #0d1117 !important; }
   :fullscreen::backdrop { background: #0d1117 !important; }
   ::backdrop { background: #0d1117 !important; }
 
@@ -1388,9 +1389,11 @@
   });
 
   document.getElementById('full').addEventListener('click', () => {
-    const el = document.documentElement;
-    if (!document.fullscreenElement) el.requestFullscreen?.().catch(() => {});
+    // 让 body 全屏而不是 <html>：全屏元素之外的区域由 ::backdrop 接管，
+    // 可以刷成主题色，避免设备在左侧留出黑色安全边
+    if (!document.fullscreenElement) document.body.requestFullscreen?.().catch(() => {});
     else document.exitFullscreen?.();
+    setTimeout(() => { if (document.fullscreenElement) document.body.style.background = '#0d1117'; }, 60);
   });
   pad.addEventListener('pointerdown', () => { if (panel.classList.contains('open')) panel.classList.remove('open'); }, true);
 
