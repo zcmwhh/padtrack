@@ -611,6 +611,15 @@
   const plList = document.getElementById('plList');
   let plLoaded = false, plCurrent = '';
 
+  // 胶囊条滚动到两端时，被切一半的那个歌单名用淡出盖住，而不是硬切
+  function paintChipFade() {
+    const max = plChips.scrollWidth - plChips.clientWidth;
+    plChips.classList.toggle('fade-l', plChips.scrollLeft > 4);
+    plChips.classList.toggle('fade-r', max > 4 && plChips.scrollLeft < max - 4);
+  }
+  plChips.addEventListener('scroll', paintChipFade, { passive: true });
+  window.addEventListener('resize', paintChipFade);
+
   function openSheet() {
     plSheet.classList.add('on');
     sheetMask.classList.add('on');
@@ -639,6 +648,7 @@
         plChips.appendChild(b);
         if (i === 0) setTimeout(() => selectPlaylist(p.id, b), 80);
       });
+      paintChipFade();   // 铺完先算一次，右侧该淡就淡
     } catch (_) {
       plList.innerHTML = '<div id="plEmpty">读取失败</div>';
     }
