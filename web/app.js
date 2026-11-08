@@ -78,6 +78,9 @@
   let pinch = false, d0 = 0, lastDist = 0, zoomAcc = 0, remZoom = 0;
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
+  let lastTapX = 0, lastTapY = 0;      // 上一次点击落点，用来判断是不是真的双击
+  const DBL_SLOP = 24;                 // 两次点击允许的位置偏差（触屏放宽到 24px）
+  const HOLD_MS = 420;                 // 按住多久算拖动
 
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
   const kfPts = new Map();
@@ -744,7 +747,10 @@
       twoTapPending = false;
       swipe3Pending = false;
       lastCX = e.clientX; lastCY = e.clientY;
-      if (performance.now() - lastTapEnd < 500) {
+      // 只有「时间短 + 位置几乎没变」才算双击的第二下。
+      // 以前只看时间，导致点完图标随手一划就被当成拖动。
+      const nearLastTap = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) <= DBL_SLOP;
+      if (performance.now() - lastTapEnd < 500 && nearLastTap) {
         // 双击的第二下：先不按左键，等手指一动才发 dblstart。
         // dblstart 会先挪 8px 再按下，破坏双击的位置容差，
         // 所以拖的时候标题栏不会被判成双击最大化；
@@ -756,8 +762,9 @@
         sx = e.clientX; sy = e.clientY; st = performance.now();
         clearTimeout(lpTimer);
         lpTimer = setTimeout(() => {
+          // 还停在 pending 说明手指没怎么动，这时候才认为是"按住拖"
           if (mode === 'pending') { mode = 'drag'; pressLeft(); flash('拖动'); }
-        }, 280);
+        }, HOLD_MS);
       }
     } else if (pts.size === 2) {
       clearTimeout(lpTimer);
@@ -795,7 +802,7 @@
         clearTimeout(lpTimer);
         lastCX = sx; lastCY = sy;
       }
-      if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > 4) {
+      if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > 8) {
         mode = 'drag';
         send({ t: 'dblstart' });
         flash('拖动');
@@ -876,7 +883,7 @@
 
       if (mode === 'pending') {
         if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
-          click('l'); lastTapEnd = now;
+          click('l'); lastTapEnd = now; lastTapX = e.clientX; lastTapY = e.clientY;
         }
       } else if (mode === 'armed') {
         // 第二下没有移动就松开 = 普通的第二次单击，双击（如标题栏最大化）照常
