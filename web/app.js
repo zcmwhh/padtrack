@@ -120,10 +120,11 @@
           lyricBase = lyricTime();
           lyricPlaying = false;
           lyricClock = performance.now();
-          songAnchor = lyricClock - lyricBase * 1000;
+          anchorAt(lyricClock);
         } else {
           lyricClock = performance.now();
           lyricPlaying = true;
+          anchorAt(lyricClock);
         }
         paintPlayIcon();
         paintLyric(true);
@@ -276,6 +277,11 @@
   let lyricLines = [], lyricBase = 0, lyricClock = 0;
   let lyricPlaying = false, lyricActive = -1, lyricSongKey = '';
 
+  // 维护不变式：songAnchor = 播放位置等于 lyricBase 的那一刻（performance.now 时间轴）
+  function anchorAt(nowMs) {
+    songAnchor = nowMs - lyricBase * 1000;
+  }
+
   function lyricTime() {
     return lyricBase + (lyricPlaying ? (performance.now() - lyricClock) / 1000 : 0);
   }
@@ -414,7 +420,8 @@
         if (typeof d.pos !== 'number' && prevDur > 0 && prevAnchor > 0) {
           const predictedEnd = prevAnchor + prevDur * 1000;
           const late = nowMs - predictedEnd;
-          if (late > -3000 && late < 25000) base = Math.max(0, late / 1000);
+          // 正常两首之间只差 0~1.5 秒；算出好几秒的「迟到」一定是基准错了，宁可不用
+          if (late > -3000 && late < 4000) base = Math.max(0, late / 1000);
         }
         // 没有上一首可推算时（手动点播/跳过），至少把「从发现到拿到歌词」这段补上
         if (typeof d.pos !== 'number' && changeAt) {
@@ -423,18 +430,18 @@
         lyricSongKey = songKey;
         lyricPlaying = !paused;
         setLyrics(d.lyric, base);
-        songAnchor = nowMs - base * 1000;
+        anchorAt(nowMs);
       } else {
         if (typeof d.pos === 'number') {
           // 播放器支持进度回传时，每次都以它为准，彻底不漂
           lyricBase = d.pos;
           lyricClock = nowMs;
-          songAnchor = nowMs - d.pos * 1000;
+          anchorAt(nowMs);
         }
         // 歌词晚到（先拿到歌名、后拿到歌词）时补一次
         if (!lyricLines.length && d.lyric && d.lyric.length) {
           setLyrics(d.lyric, typeof d.pos === 'number' ? d.pos : 0);
-          songAnchor = nowMs - lyricBase * 1000;
+          anchorAt(nowMs);
         }
       }
 
@@ -448,10 +455,12 @@
         if (paused && lyricPlaying) {
           lyricBase = lyricTime();
           lyricPlaying = false;
-          songAnchor = lyricClock - lyricBase * 1000;
+          lyricClock = nowMs;
+          anchorAt(nowMs);
         } else if (!paused && !lyricPlaying) {
           lyricClock = nowMs;
           lyricPlaying = true;
+          anchorAt(nowMs);          // 恢复时也要重锚，否则暂停的时长会被算进基准
         }
         uiPaused = paused;
         paintPlayIcon();
@@ -523,7 +532,7 @@
       if (d && d.ok) {
         lyricBase = target;
         lyricClock = performance.now();
-        songAnchor = lyricClock - target * 1000;
+        anchorAt(lyricClock);
         paintLyric(true);
         flash('跳到 ' + fmtTime(target));
       } else {
@@ -653,7 +662,7 @@
     if (t > songDur + 2) {
       lyricBase = t - songDur;
       lyricClock = performance.now();
-      songAnchor = lyricClock - lyricBase * 1000;
+      anchorAt(lyricClock);
       paintLyric(true);
     }
     const p = Math.max(0, Math.min(1, lyricTime() / songDur));
