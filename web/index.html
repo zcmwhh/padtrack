@@ -369,55 +369,6 @@
   .islemode.unsupported { opacity: .32; }
 
 
-  /* ---------------- 随机 / 循环 ---------------- */
-  const modeShuffle = document.getElementById('modeShuffle');
-  const modeRepeat = document.getElementById('modeRepeat');
-  let mShuffle = null, mRepeat = null;     // null = 当前播放器不支持
-
-  function paintModes() {
-    modeShuffle.classList.toggle('on', mShuffle === true);
-    modeShuffle.classList.toggle('unsupported', mShuffle === null);
-    modeRepeat.classList.toggle('on', mRepeat === 1 || mRepeat === 2);
-    modeRepeat.classList.toggle('unsupported', mRepeat === null);
-    modeRepeat.innerHTML = mRepeat === 1 ? REPEAT_ONE_SVG : REPEAT_ALL_SVG;
-  }
-
-  async function setMode(what, value) {
-    try {
-      const r = await fetch(`/mode?k=${encodeURIComponent(KEY)}&what=${what}&value=${value}`,
-        { cache: 'no-store' });
-      const d = await r.json();
-      if (d && d.ok) {
-        lastMedia = '';
-        pollMedia(true);
-        flash(what === 'shuffle'
-          ? (value ? '随机播放：开' : '随机播放：关')
-          : (value === 0 ? '循环：关' : value === 1 ? '单曲循环' : '列表循环'));
-        return true;
-      }
-      flash(d && d.reason === 'no-session' ? '这个播放器不支持切换播放方式' : '切换失败');
-    } catch (_) {}
-    return false;
-  }
-
-  modeShuffle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (mShuffle === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
-    mShuffle = !mShuffle;
-    paintModes();
-    if (!setMode('shuffle', mShuffle ? 1 : 0)) { mShuffle = !mShuffle; paintModes(); }
-  });
-
-  modeRepeat.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (mRepeat === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
-    const next = mRepeat === 0 ? 2 : mRepeat === 2 ? 1 : 0;
-    const prev = mRepeat;
-    mRepeat = next;
-    paintModes();
-    if (!setMode('repeat', next)) { mRepeat = prev; paintModes(); }
-  });
-
   /* ---------------- 歌单抽屉 ---------------- */
   #sheetMask {
     position: fixed; inset: 0; z-index: 80; background: rgba(5, 8, 12, .5);
@@ -1054,6 +1005,8 @@
         uiPaused = !uiPaused;
         paintPlayIcon();
         iconLockUntil = performance.now() + 2500;
+        // 锁定结束后拉一次真实状态，按键没生效时把图标纠正回来
+        setTimeout(() => { lastMedia = ''; pollMedia(true); }, 2600);
       }
       send({ t: 'k', vk: parseInt(b.dataset.media, 10) });   // 系统媒体键
       b.classList.add('on');
@@ -1097,6 +1050,56 @@
     document.getElementById('numBtn').classList.add('on');
   }
 
+  /* ---------------- 随机 / 循环 ---------------- */
+  const modeShuffle = document.getElementById('modeShuffle');
+  const modeRepeat = document.getElementById('modeRepeat');
+  let mShuffle = null, mRepeat = null;     // null = 当前播放器不支持
+
+  function paintModes() {
+    modeShuffle.classList.toggle('on', mShuffle === true);
+    modeShuffle.classList.toggle('unsupported', mShuffle === null);
+    modeRepeat.classList.toggle('on', mRepeat === 1 || mRepeat === 2);
+    modeRepeat.classList.toggle('unsupported', mRepeat === null);
+    modeRepeat.innerHTML = mRepeat === 1 ? REPEAT_ONE_SVG : REPEAT_ALL_SVG;
+  }
+
+  async function setMode(what, value) {
+    try {
+      const r = await fetch(`/mode?k=${encodeURIComponent(KEY)}&what=${what}&value=${value}`,
+        { cache: 'no-store' });
+      const d = await r.json();
+      if (d && d.ok) {
+        lastMedia = '';
+        pollMedia(true);
+        flash(what === 'shuffle'
+          ? (value ? '随机播放：开' : '随机播放：关')
+          : (value === 0 ? '循环：关' : value === 1 ? '单曲循环' : '列表循环'));
+        return true;
+      }
+      flash(d && d.reason === 'no-session' ? '这个播放器不支持切换播放方式' : '切换失败');
+    } catch (_) {}
+    return false;
+  }
+
+  modeShuffle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (mShuffle === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
+    mShuffle = !mShuffle;
+    paintModes();
+    if (!setMode('shuffle', mShuffle ? 1 : 0)) { mShuffle = !mShuffle; paintModes(); }
+  });
+
+  modeRepeat.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (mRepeat === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
+    const next = mRepeat === 0 ? 2 : mRepeat === 2 ? 1 : 0;
+    const prev = mRepeat;
+    mRepeat = next;
+    paintModes();
+    if (!setMode('repeat', next)) { mRepeat = prev; paintModes(); }
+  });
+
+
   /* ---------------- 媒体信息 + 滚动歌词 ---------------- */
   const island = document.getElementById('island');
   const musicTitle = document.getElementById('musicTitle');
@@ -1136,7 +1139,10 @@
   let uiPaused = false;          // 界面认为当前是否暂停
   let iconLockUntil = 0;         // 刚点过按钮的一小段时间内不被轮询覆盖
 
+  let paintedPaused = null;
+
   function paintPlayIcon() {
+    paintedPaused = uiPaused;
     const ico = uiPaused ? SVG_PLAY : SVG_PAUSE;
     document.querySelectorAll('#island [data-media="179"]').forEach((b) => { b.innerHTML = ico; });
   }
@@ -1311,7 +1317,7 @@
       paintModes();
       uiPaused = paused;
       if (performance.now() > iconLockUntil) paintPlayIcon();
-    } catch (_) {}
+    } catch (err) { console.error('pollMedia 出错:', err && err.message); }
   }
   pollMedia();
   setInterval(pollMedia, 3000);
@@ -1496,7 +1502,11 @@
     seekBar.style.setProperty('--p', (p * 100).toFixed(1));
     musicTime.textContent = fmtTime(lyricTime()) + ' / ' + fmtTime(songDur);
   }
-  setInterval(() => { paintLyric(false); paintProgress(); }, 220);
+  setInterval(() => {
+    paintLyric(false);
+    paintProgress();
+    if (performance.now() > iconLockUntil && uiPaused !== paintedPaused) paintPlayIcon();
+  }, 220);
 
   // ?debug=1 时显示同步诊断：paused 时 t 应该停住
   const syncbox = document.getElementById('syncbox');
