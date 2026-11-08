@@ -347,18 +347,24 @@
       if (lyricLines[i][0] <= t) idx = i;
       else break;
     }
-    if (idx === lyricActive && !force) return;
+    if (idx === lyricActive && !force && lyricInner.style.transform) return;
     lyricActive = idx;
 
     // 左侧滚动栏
     const items = lyricInner.children;
-    for (let i = 0; i < items.length; i++) items[i].classList.toggle('active', i === idx);
-    if (idx >= 0 && items[idx]) {
+    for (let i = 0; i < items.length; i++) {
+      items[i].classList.toggle('active', i === idx);
+      // 前奏阶段没有高亮行，把第一句标成「待唱」，别让画面空着
+      items[i].classList.toggle('pending', idx < 0 && i === 0);
+    }
+    // 还没到第一句（新歌前奏）时 idx = -1：这时把第一句居中摆放，
+    // 否则容器会保留上一首的位移，新歌词直接被顶出画面，看起来像"高亮没了"。
+    const target = idx >= 0 ? items[idx] : items[0];
+    if (target) {
       const h = lyricsEl.clientHeight;
       // 用目标行的真实布局位置居中。歌词折行时每行高度不同，
       // 按「行号 × 行高」算会越滚越偏（高亮行慢慢飘出屏幕）。
-      const line = items[idx];
-      const y = line.offsetTop + line.offsetHeight / 2;
+      const y = target.offsetTop + target.offsetHeight / 2;
       lyricInner.style.transform = `translateY(${Math.round(h / 2 - y)}px)`;
     }
   }

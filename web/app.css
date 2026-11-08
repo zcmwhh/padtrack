@@ -503,10 +503,15 @@
   }
   .lyric-line.active {
     /* 不要改 font-weight：加粗会让长句多折一行，整张列表重排，
-       高亮行就会越滚越偏 */
-    color: #f2f8ff; opacity: 1; transform: scale(1.02);
+       高亮行就会越滚越偏。显眼靠颜色、缩放和发光就够了。 */
+    color: #ffffff; opacity: 1; transform: scale(1.06);
     filter: blur(0);
-    text-shadow: 0 0 22px rgba(150, 200, 255, .5);
+    text-shadow: 0 0 14px rgba(180, 220, 255, .75), 0 0 34px rgba(120, 180, 255, .45);
+  }
+  /* 前奏阶段（还没到第一句）：把第一句标成「待唱」 */
+  .lyric-line.pending {
+    color: #c3d5e6; opacity: .95; transform: scale(1.0);
+    filter: blur(0);
   }
   /* 有歌词时让中间的提示文字让位 */
   body.has-lyrics #hint { opacity: 0 !important; }
