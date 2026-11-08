@@ -937,8 +937,8 @@
     S.coverBg = lyrBgBox.checked; saveS(); applyBgCover();
     flash(S.coverBg ? '封面背景：开' : '封面背景：关');
   });
-  document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-5));
-  document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(5));
+  document.getElementById('lyrBack').addEventListener('click', () => nudgeLyric(-1));
+  document.getElementById('lyrFwd').addEventListener('click', () => nudgeLyric(1));
   document.getElementById('lyrReset').addEventListener('click', () => {
     const before = lyricOffset;
     lyricOffset = 0;
