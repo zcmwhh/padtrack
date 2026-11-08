@@ -255,6 +255,44 @@
   .isle-wave { margin-right: 2px; }
 
 
+
+  /* ---------------- 展开态：两行迷你播放器 ---------------- */
+  #island.exp {
+    width: min(94vw, 430px); height: 140px; border-radius: 30px;
+  }
+  .isle-full {
+    flex-direction: column; justify-content: center; align-items: stretch;
+    gap: 12px; padding: 14px 16px;
+  }
+  .isle-top { display: flex; align-items: center; gap: 12px; width: 100%; }
+  .isle-top .isle-meta { flex: 1; min-width: 0; }
+  .isle-cover.big { width: 58px; height: 58px; border-radius: 14px; }
+
+  .isle-bottom {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 0 4px;
+  }
+  .islectl {
+    width: 34px; height: 34px; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: none; color: #c7d5e3;
+    transition: transform .18s var(--ease-spring), color .18s ease, background .18s ease;
+  }
+  .islectl svg { width: 19px; height: 19px; }
+  .islectl:active { transform: scale(.86); color: #6ee7b7; }
+  .isle-play-big {
+    width: 44px; height: 44px; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(255, 255, 255, .06);
+    color: #f2f8ff;
+    transition: transform .18s var(--ease-spring), background .18s ease;
+  }
+  .isle-play-big svg { width: 20px; height: 20px; }
+  .isle-play-big:active { transform: scale(.88); background: rgba(255, 255, 255, .16); }
+  .islemode { width: 30px; height: 30px; }
+  .islemode svg { width: 17px; height: 17px; }
+
   /* ---------------- 可拖动的进度条 ---------------- */
   .isle-barrow {
     display: flex; align-items: center; gap: 8px;
@@ -290,6 +328,68 @@
     flex: none; font-size: 10.5px; color: #7d8fa1; letter-spacing: .2px;
     font-variant-numeric: tabular-nums;
   }
+
+
+  .islemode {
+    flex: none; width: 22px; height: 22px; border-radius: 6px;
+    display: grid; place-items: center; padding: 0;
+    background: transparent; border: none; color: #5f7183;
+    transition: color .2s ease, background .2s ease, transform .18s var(--ease-spring);
+  }
+  .islemode svg { width: 15px; height: 15px; }
+  .islemode.on { color: #6ee7b7; }
+  .islemode:active { transform: scale(.86); }
+  .islemode.unsupported { opacity: .32; }
+
+
+  /* ---------------- 随机 / 循环 ---------------- */
+  const modeShuffle = document.getElementById('modeShuffle');
+  const modeRepeat = document.getElementById('modeRepeat');
+  let mShuffle = null, mRepeat = null;     // null = 当前播放器不支持
+
+  function paintModes() {
+    modeShuffle.classList.toggle('on', mShuffle === true);
+    modeShuffle.classList.toggle('unsupported', mShuffle === null);
+    modeRepeat.classList.toggle('on', mRepeat === 1 || mRepeat === 2);
+    modeRepeat.classList.toggle('unsupported', mRepeat === null);
+    modeRepeat.innerHTML = mRepeat === 1 ? REPEAT_ONE_SVG : REPEAT_ALL_SVG;
+  }
+
+  async function setMode(what, value) {
+    try {
+      const r = await fetch(`/mode?k=${encodeURIComponent(KEY)}&what=${what}&value=${value}`,
+        { cache: 'no-store' });
+      const d = await r.json();
+      if (d && d.ok) {
+        lastMedia = '';
+        pollMedia(true);
+        flash(what === 'shuffle'
+          ? (value ? '随机播放：开' : '随机播放：关')
+          : (value === 0 ? '循环：关' : value === 1 ? '单曲循环' : '列表循环'));
+        return true;
+      }
+      flash(d && d.reason === 'no-session' ? '这个播放器不支持切换播放方式' : '切换失败');
+    } catch (_) {}
+    return false;
+  }
+
+  modeShuffle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (mShuffle === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
+    mShuffle = !mShuffle;
+    paintModes();
+    if (!setMode('shuffle', mShuffle ? 1 : 0)) { mShuffle = !mShuffle; paintModes(); }
+  });
+
+  modeRepeat.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (mRepeat === null) { flash('网易云不支持，需要在它自己的界面里切'); return; }
+    const next = mRepeat === 0 ? 2 : mRepeat === 2 ? 1 : 0;
+    const prev = mRepeat;
+    mRepeat = next;
+    paintModes();
+    if (!setMode('repeat', next)) { mRepeat = prev; paintModes(); }
+  });
 
   /* ---------------- 歌单抽屉 ---------------- */
   #sheetMask {
@@ -691,17 +791,24 @@
     <button class="isle-play" data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
   </div>
   <div class="isle-full">
-    <img class="isle-cover big" id="musicCoverBig" alt="" />
-    <div class="isle-meta">
-      <div id="musicTitleFull">—</div>
-      <div id="musicArtist"></div>
-      <div class="isle-barrow"><div class="isle-bar" id="seekBar"><i id="musicProg"></i></div><span id="musicTime">0:00</span></div>
+    <div class="isle-top">
+      <img class="isle-cover big" id="musicCoverBig" alt="" />
+      <div class="isle-meta">
+        <div id="musicTitleFull">—</div>
+        <div id="musicArtist"></div>
+        <div class="isle-barrow">
+          <div class="isle-bar" id="seekBar"><i id="musicProg"></i></div>
+          <span id="musicTime">0:00</span>
+        </div>
+      </div>
     </div>
-    <div class="isle-ctrl">
-      <button id="plBtn" aria-label="歌单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="18.5" cy="15.5" r="2.2"/><path d="M20.7 15.5V8.4l-4 1"/></svg></button>
-      <button data-media="177" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6.2 9.4 12 19 17.8z" fill="currentColor"/></svg></button>
-      <button data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
-      <button data-media="176" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 6.2 14.6 12 5 17.8z" fill="currentColor"/></svg></button>
+    <div class="isle-bottom">
+      <button class="islemode" id="modeShuffle" aria-label="随机播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3.2l7.6 10H20M4 17h3.2l7.6-10H20"/><path d="M17.2 4.4 20 7l-2.8 2.6"/><path d="M17.2 14.4 20 17l-2.8 2.6"/></svg></button>
+      <button class="islectl" data-media="177" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 6.2 9.4 12 19 17.8z" fill="currentColor"/></svg></button>
+      <button class="isle-play-big" data-media="179" aria-label="播放/暂停"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.4" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/><rect x="13" y="5.4" width="3.6" height="13.2" rx="1.4" fill="currentColor"/></svg></button>
+      <button class="islectl" data-media="176" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 5.5v13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 6.2 14.6 12 5 17.8z" fill="currentColor"/></svg></button>
+      <button class="islemode" id="modeRepeat" aria-label="循环播放"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 8.5h11a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z"/><path d="M8.5 6.2 6.3 8.5l2.2 2.3"/><path d="M15.5 15.8l2.2-2.2-2.2-2.3"/></svg></button>
+      <button class="islectl" id="plBtn" aria-label="歌单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h11M4 12h11M4 17h7"/><circle cx="18.5" cy="15.5" r="2.2"/><path d="M20.7 15.5V8.4l-4 1"/></svg></button>
     </div>
   </div>
 </div>
@@ -962,6 +1069,8 @@
   const musicWave = document.getElementById('musicWave');
   const musicProg = document.getElementById('musicProg');
   const musicTime = document.getElementById('musicTime');
+  const REPEAT_ALL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 8.5h11a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z"/><path d="M8.5 6.2 6.3 8.5l2.2 2.3"/><path d="M15.5 15.8l2.2-2.2-2.2-2.3"/></svg>';
+  const REPEAT_ONE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 8.5h11a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z"/><path d="M8.5 6.2 6.3 8.5l2.2 2.3"/><path d="M15.5 15.8l2.2-2.2-2.2-2.3"/><text x="12" y="15" font-size="7.5" fill="currentColor" stroke="none" text-anchor="middle">1</text></svg>';
   let islandTimer = 0, songDur = 0, songAnchor = 0;
 
   // 展开的二级菜单：只要开始干别的就收回去
@@ -1133,6 +1242,9 @@
         lyricPlaying = true;
       }
       musicWave.classList.toggle('playing', !paused);
+      mShuffle = typeof d.shuffle === 'boolean' ? d.shuffle : null;
+      mRepeat = typeof d.repeat === 'number' ? d.repeat : null;
+      paintModes();
       const ico = paused ? SVG_PLAY : SVG_PAUSE;
       document.querySelectorAll('#island [data-media="179"]').forEach((b) => { b.innerHTML = ico; });
     } catch (_) {}

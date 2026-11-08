@@ -372,7 +372,7 @@ if ($null -eq $s) {
   $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
   $i = $s.GetPlaybackInfo()
   $tl = $s.GetTimelineProperties()
-  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus; pos = [double]$tl.Position.TotalSeconds; dur = [double]$tl.EndTime.TotalSeconds } | ConvertTo-Json -Compress
+  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus; pos = [double]$tl.Position.TotalSeconds; dur = [double]$tl.EndTime.TotalSeconds; shuffle = [bool]$i.ShuffleEnabled; repeat = [int]$i.AutoRepeatMode } | ConvertTo-Json -Compress
 }
 """
 
@@ -617,6 +617,60 @@ $ticks = [long]([double]::Parse($args[0]) * 10000000)
 $ok = Await ($s.TryChangePlaybackPositionAsync($ticks)) ([bool])
 @{ ok = [bool]$ok } | ConvertTo-Json -Compress
 """
+
+
+MODE_PS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+})[0]
+function Await($op, $t) {
+  $m = $gen.MakeGenericMethod($t)
+  $task = $m.Invoke($null, @($op))
+  $task.Wait(-1) | Out-Null
+  $task.Result
+}
+[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+$s = $mgr.GetCurrentSession()
+if ($null -eq $s) { '{"ok":false,"reason":"no-session"}'; exit }
+$what = $args[0]
+try {
+  if ($what -eq 'shuffle') {
+    $ok = Await ($s.TryChangeShuffleActiveAsync([bool]::Parse($args[1]))) ([bool])
+  } else {
+    $mode = [Windows.Media.Playback.MediaPlaybackAutoRepeatMode]([int]$args[1])
+    $ok = Await ($s.TryChangeAutoRepeatModeAsync($mode)) ([bool])
+  }
+  @{ ok = [bool]$ok } | ConvertTo-Json -Compress
+} catch {
+  '{"ok":false,"reason":"error"}'
+}
+"""
+
+
+def set_play_mode(what, value):
+    """切换随机/循环。只有支持系统媒体控制的播放器才能改。"""
+    try:
+        script = os.path.join(tempfile.gettempdir(), "padtrack_mode.ps1")
+        if not os.path.exists(script):
+            with open(script, "w", encoding="utf-8") as f:
+                f.write(MODE_PS)
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+             str(what), str(int(value))],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=8, creationflags=0x08000000,
+        ).stdout.strip()
+        for line in reversed(out.splitlines()):
+            line = line.strip()
+            if line.startswith("{") and line.endswith("}"):
+                return json.loads(line)
+    except Exception:
+        pass
+    return {"ok": False, "reason": "error"}
 
 
 def seek_to(seconds):
@@ -876,6 +930,19 @@ class Handler(socketserver.BaseRequestHandler):
                     return
                 pid = params.get("id", [""])[0]
                 body = json.dumps(netease_playlist_tracks(pid), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/mode":
+                if key != KEY:
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                what = params.get("what", [""])[0]
+                try:
+                    value = int(params.get("value", ["0"])[0])
+                except ValueError:
+                    value = 0
+                body = json.dumps(set_play_mode(what, value), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
