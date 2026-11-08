@@ -23,6 +23,7 @@ import socketserver
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from ctypes import wintypes
@@ -344,6 +345,68 @@ FORBIDDEN = """<!doctype html><meta charset="utf-8">
 </body>"""
 
 
+# ---------------------------------------------------------------- 媒体信息
+# 走 Windows 系统媒体控制（GSMTC），取当前播放器的曲名/歌手/状态。
+MEDIA_PS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$gen = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+})[0]
+function Await($op, $t) {
+  $m = $gen.MakeGenericMethod($t)
+  $task = $m.Invoke($null, @($op))
+  $task.Wait(-1) | Out-Null
+  $task.Result
+}
+[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+$s = $mgr.GetCurrentSession()
+if ($null -eq $s) {
+  '{"title":"","artist":"","status":"none"}'
+} else {
+  $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+  $i = $s.GetPlaybackInfo()
+  @{ title = $p.Title; artist = $p.Artist; status = [string]$i.PlaybackStatus } | ConvertTo-Json -Compress
+}
+"""
+
+_media_lock = threading.Lock()
+_media_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": ""}}
+
+
+def query_media():
+    """当前播放曲目，带 2.5 秒缓存（每查一次要起一个 PowerShell，约 0.3 秒）。"""
+    if time.time() - _media_cache["t"] < 2.5:
+        return _media_cache["data"]
+
+    data = {"title": "", "artist": "", "status": ""}
+    with _media_lock:
+        if time.time() - _media_cache["t"] < 2.5:      # 等锁期间别人刷过了
+            return _media_cache["data"]
+        try:
+            script = os.path.join(tempfile.gettempdir(), "padtrack_media.ps1")
+            if not os.path.exists(script):
+                with open(script, "w", encoding="utf-8") as f:
+                    f.write(MEDIA_PS)
+            out = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=8, creationflags=0x08000000,
+            ).stdout.strip()
+            for line in reversed(out.splitlines()):
+                line = line.strip()
+                if line.startswith("{") and line.endswith("}"):
+                    data = json.loads(line)
+                    break
+        except Exception:
+            pass
+        _media_cache["t"] = time.time()
+        _media_cache["data"] = data
+        return data
+
+
 class Handler(socketserver.BaseRequestHandler):
     def handle(self):
         sock = self.request
@@ -391,6 +454,14 @@ class Handler(socketserver.BaseRequestHandler):
 
             if method == "GET" and path == "/favicon.ico":
                 self._http(sock, 204, b"")
+                return
+
+            if method == "GET" and path == "/media":
+                if key != KEY:
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(query_media(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
             self._http(sock, 404, b"not found")
