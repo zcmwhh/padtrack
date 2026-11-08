@@ -988,7 +988,7 @@
         }
         // 没有上一首可推算时（手动点播/跳过），至少把「从发现到拿到歌词」这段补上
         if (typeof d.pos !== 'number' && changeAt) {
-          base = Math.max(base, (nowMs - changeAt) / 1000);
+          base = Math.max(base, (nowMs - changeAt) / 1000 + 0.5);   // +0.5 是轮询的平均发现延迟
         }
         lyricSongKey = songKey;
         lyricPlaying = !paused;
