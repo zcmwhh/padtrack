@@ -173,6 +173,32 @@
   #kfPad .kbkey.mod, #kfPad .kbkey.fn { font-size: 15px; }
   .kbkey.hit { background: #2c4a3c !important; border-color: rgba(62, 207, 142, .5) !important; }
 
+  /* F / J 键位横杆：和实体键盘的定位凸起一样，盲打时手指有参照 */
+  .kbkey { position: relative; }
+  .kbkey.home::after {
+    content: ''; position: absolute; left: 50%; bottom: 6px;
+    width: 12px; height: 2px; border-radius: 2px;
+    background: currentColor; opacity: .55; transform: translateX(-50%);
+  }
+
+  /* 键盘形态切换条（每种键盘里都有） */
+  .modebar { display: flex; gap: 5px; margin-left: auto; }
+  .modebar .mini { padding: 4px 9px; font-size: 12px; }
+  .modebar .mini.on {
+    background: rgba(62, 207, 142, .18);
+    border-color: rgba(62, 207, 142, .55);
+    color: #8fe3bd;
+  }
+
+  /* 全屏键盘顶部的触控条 */
+  #kfStrip {
+    height: 62px; margin-bottom: 8px; border-radius: 12px;
+    border: 1px solid rgba(120, 150, 180, .22);
+    background: radial-gradient(420px 120px at 50% 50%, #16212c 0%, #0e151d 70%);
+    display: flex; align-items: center; justify-content: center;
+    color: #5d6b7a; font-size: 12px; touch-action: none;
+  }
+
   /* 分屏：键盘为主 + 小触控板 */
   #splitmode {
     position: fixed; inset: 0; z-index: 60;
@@ -268,9 +294,7 @@
 <div id="kb">
   <div class="kbhead">
     <span id="kbTitle">走电脑输入法 · 拼音候选会出现在电脑屏幕上</span>
-    <button class="mini" id="spBtn">分屏</button>
-    <button class="mini" id="trBtn">环绕</button>
-    <button class="mini" id="kfBtn">全屏</button>
+    <div class="modebar" data-modebar></div>
     <button class="mini" id="kbRawBtn">直接输入</button>
     <button class="mini" id="kbCloseBtn">收起</button>
   </div>
@@ -285,15 +309,18 @@
 
 <div id="kbfull">
   <div class="kfbar">
-    <span>轻点按键 · 单指滑动移光标 · 双指滑动滚动</span>
+    <span>轻点按键 · 触控条上滑动移光标</span>
+    <div class="modebar" data-modebar></div>
     <button class="mini" id="kfClose">退出</button>
   </div>
+  <div id="kfStrip">触控条：轻点 = 左键 · 双指轻点 = 右键 · 滑动 = 移光标 · 双指滑 = 滚动</div>
   <div id="kfPad"></div>
 </div>
 
 <div id="splitmode">
   <div class="kfbar">
     <span>分屏：键盘为主，右侧小触控板</span>
+    <div class="modebar" data-modebar></div>
     <button class="mini" id="spClose">退出</button>
   </div>
   <div class="spbody">
@@ -305,6 +332,7 @@
 <div id="trmode">
   <div class="kfbar">
     <span>环绕：上方打字区，下方 3:2 触控板，两侧功能区</span>
+    <div class="modebar" data-modebar></div>
     <button class="mini" id="trClose">退出</button>
   </div>
   <div id="trTop"></div>
@@ -386,7 +414,13 @@
   let accX = 0, accY = 0, remX = 0, remY = 0;
   let wheelX = 0, wheelY = 0, remWX = 0, remWY = 0;
   let twoStartT = 0, twoMoved = 0;
+  // 双指轻点要看"两根手指都抬起"才算数，但手指不可能同时离开，
+  // 所以用这个标记跨过"2 指 → 1 指"的中间状态。
+  let twoTapPending = false, twoTapT = 0;
   let threeStart = null, sw3dx = 0, sw3dy = 0;
+  // 三指同理：手指是一根根抬起的，用标记跨过"3 指 → 2 指 → 1 指"的中间状态，
+  // 等到最后一根手指抬起时再判定手势方向。
+  let swipe3Pending = false;
   let pinch = false, d0 = 0, lastDist = 0, zoomAcc = 0, remZoom = 0;
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
@@ -429,6 +463,8 @@
     inertia = 0; velY = 0;
 
     if (pts.size === 1) {
+      twoTapPending = false;
+      swipe3Pending = false;
       lastCX = e.clientX; lastCY = e.clientY;
       if (performance.now() - lastTapEnd < 500 && !lockOn) {
         // 双击的第二下：先不按左键，等手指一动才发 dblstart。
@@ -450,6 +486,8 @@
       if (mode === 'drag') releaseLeft();
       mode = 'scroll2';
       twoStartT = performance.now(); twoMoved = 0;
+      twoTapPending = true; twoTapT = twoStartT;
+      swipe3Pending = false;
       lastCX = centX(); lastCY = centY();
       wheelX = wheelY = remWX = remWY = 0;
       pinch = false; zoomAcc = 0; remZoom = 0; pinchRef = null;
@@ -462,6 +500,8 @@
       mode = 'swipe3';
       threeStart = { x: centX(), y: centY(), t: performance.now() };
       sw3dx = sw3dy = 0;
+      swipe3Pending = true;
+      twoTapPending = false;      // 第三根手指落下，取消双指轻点
     }
     e.preventDefault();
   }, { passive: false });
@@ -483,6 +523,9 @@
         flash('拖动');
       }
       if (mode === 'move' || mode === 'drag') {
+        if (twoTapPending && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > 6) {
+          twoTapPending = false;          // 抬掉一根手指后还继续划，就不算轻点了
+        }
         accX += e.clientX - lastCX;
         accY += e.clientY - lastCY;
         lastCX = e.clientX; lastCY = e.clientY;
@@ -494,6 +537,7 @@
       const dx = nx - lastCX, dy = ny - lastCY;
       lastCX = nx; lastCY = ny;
       twoMoved += Math.hypot(dx, dy);
+      if (twoMoved > 20) twoTapPending = false;   // 明显在滑，不是轻点
 
       // 真·捏合的特征：两指间距在短时间内明显变化，而整体重心几乎没动。
       // 滚动时重心会大幅移动、间距基本不变，用这个区分，避免边滚边缩放。
@@ -548,6 +592,10 @@
 
     if (pts.size === 0) {
       clearTimeout(lpTimer);
+      // 双指轻点：先抬一根手指时 mode 已经变成 move，所以靠标记判断
+      const twoTap = twoTapPending && !pinch && now - twoTapT < 380;
+      twoTapPending = false;
+
       if (mode === 'pending') {
         if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
           if (lockOn) setLock(false);   // 锁定状态下轻点 = 松开
@@ -558,28 +606,32 @@
         if (lockOn) setLock(false); else click('l');
       } else if (mode === 'drag') {
         releaseLeft();
-      } else if (mode === 'scroll2') {
-        if (!pinch && twoMoved < 15 && now - twoStartT < 320) {
-          click('r');
-        } else if (!pinch) {
-          inertia = velY * 0.55;          // 松手后按原生触控板那样继续滑一段（单位：格）
-        }
-      } else if (mode === 'swipe3' && threeStart) {
+      } else if (swipe3Pending && threeStart) {
+        // 三指必须排在双指前面：第三根手指落下时，双指的标记可能还留着
         const dur = now - threeStart.t;
         const moved = Math.hypot(sw3dx, sw3dy);
+        swipe3Pending = false;
         if (moved < 26 && dur < 380) {
           send({ t: 'k', vk: 0x5B });                                  // 三指轻点 = 开始菜单
+          flash('开始菜单');
         } else if (Math.abs(sw3dy) > Math.abs(sw3dx) && Math.abs(sw3dy) > 70) {
-          if (sw3dy < 0) send({ t: 'ks', mods: ['win'], vk: 0x09 });   // 上滑 = 任务视图
-          else send({ t: 'ks', mods: ['win'], vk: 0x44 });             // 下滑 = 显示桌面
+          if (sw3dy < 0) { send({ t: 'ks', mods: ['win'], vk: 0x09 }); flash('任务视图'); }
+          else { send({ t: 'ks', mods: ['win'], vk: 0x44 }); flash('显示桌面'); }
         } else if (Math.abs(sw3dx) > 70) {
-          if (sw3dx < 0) send({ t: 'ks', mods: ['alt'], vk: 0x09 });   // 左滑 = 下一个窗口
-          else send({ t: 'ks', mods: ['alt', 'shift'], vk: 0x09 });    // 右滑 = 上一个窗口
+          if (sw3dx < 0) { send({ t: 'ks', mods: ['alt'], vk: 0x09 }); flash('下一个窗口'); }
+          else { send({ t: 'ks', mods: ['alt', 'shift'], vk: 0x09 }); flash('上一个窗口'); }
+        } else {
+          flash('三指手势幅度太小');
         }
+      } else if (twoTap) {
+        click('r');                      // 双指轻点 = 右键
+      } else if (mode === 'scroll2') {
+        if (!pinch) inertia = velY * 0.55;   // 松手后按原生触控板那样继续滑一段（单位：格）
       }
       mode = Math.abs(inertia) >= 0.2 ? 'inertia' : 'idle';
     } else if (pts.size === 1) {
-      if (mode === 'scroll2' || mode === 'swipe3') {
+      // 三指手势还没判定完时不要切到"移动光标"，否则最后一根手指会把光标带跑
+      if (!swipe3Pending && (mode === 'scroll2' || mode === 'swipe3')) {
         mode = 'move';
         const p = pts.values().next().value;
         lastCX = p.x; lastCY = p.y;
@@ -758,54 +810,49 @@
   const kfPadEl = document.getElementById('kfPad');
   const spKeysEl = document.getElementById('spKeys');
   let stickyMods = [];
-  let curLayer = 'main';
 
   // 每个键：{ label, vk, w(宽度权重), cls }
   const K = (label, vk, w, cls) => ({ label, vk, w, cls });
   const TXT = (label, vk, w) => ({ label, vk, w });
 
-  // 主层：只保留打字必需键，把不常用的挪到 Fn 层，减少误触
+  // 完整 104 键布局：和电脑键盘一一对应，哪根手指按哪个键不用重新记
   const LAYER_MAIN = [
-    { h: 0.82, cls: 'indent0', keys: [
-      TXT('1',0x31),TXT('2',0x32),TXT('3',0x33),TXT('4',0x34),TXT('5',0x35),
-      TXT('6',0x36),TXT('7',0x37),TXT('8',0x38),TXT('9',0x39),TXT('0',0x30),
-    ] },
-    { cls: 'indent0', keys: [
-      TXT('q',0x51),TXT('w',0x57),TXT('e',0x45),TXT('r',0x52),TXT('t',0x54),
-      TXT('y',0x59),TXT('u',0x55),TXT('i',0x49),TXT('o',0x4F),TXT('p',0x50),
-    ] },
-    { cls: 'indent1', keys: [
-      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),TXT('f',0x46),TXT('g',0x47),
-      TXT('h',0x48),TXT('j',0x4A),TXT('k',0x4B),TXT('l',0x4C),
-    ] },
-    { cls: 'indent2', keys: [
-      K('⇧',0x10,1.5,'mod'),TXT('z',0x5A),TXT('x',0x58),TXT('c',0x43),TXT('v',0x56),
-      TXT('b',0x42),TXT('n',0x4E),TXT('m',0x4D),TXT(',',0xBC),TXT('.',0xBE),
-      K('⌫',0x08,1.45,'fn'),
+    { h: 0.78, keys: [
+      K('ESC',0x1B,1.2,'fn'),
+      K('F1',0x70),K('F2',0x71),K('F3',0x72),K('F4',0x73),
+      K('F5',0x74),K('F6',0x75),K('F7',0x76),K('F8',0x77),
+      K('F9',0x78),K('F10',0x79),K('F11',0x7A),K('F12',0x7B),
+      K('打印',0x2C,1.05,'fn'),K('卷轴',0x91,1.05,'fn'),K('停顿',0x13,1.05,'fn'),
     ] },
     { keys: [
-      K('123',-1,1.15,'mod'),K('Ctrl',0x11,1.05,'mod'),K('空格',0x20,4.6,'space'),
-      K('回车',0x0D,1.75,'fn'),
-    ] },
-  ];
-
-  // Fn 层：导航、窗口、功能键
-  const LAYER_FN = [
-    { keys: [
-      K('Esc',0x1B,1.1,'fn'),K('Tab',0x09,1.1,'fn'),K('Win',0x5B,1.1,'mod'),K('Alt',0x12,1.1,'mod'),
-      K('Ctrl',0x11,1.1,'mod'),K('Del',0x2E,1.1,'fn'),
+      K('`~',0xC0),K('1!',0x31),K('2@',0x32),K('3#',0x33),K('4$',0x34),
+      K('5%',0x35),K('6^',0x36),K('7&',0x37),K('8*',0x38),K('9(',0x39),
+      K('0)',0x30),K('-_',0xBD),K('=+',0xBB),K('退格',0x08,2.2,'fn'),
     ] },
     { keys: [
-      TXT('←',0x25),TXT('↑',0x26),TXT('↓',0x28),TXT('→',0x27),
-      K('Home',0x24,1.3,'fn'),K('End',0x23,1.3,'fn'),
+      K('标签页',0x09,1.6,'fn'),
+      K('Q',0x51),K('W',0x57),K('E',0x45),K('R',0x52),K('T',0x54),
+      K('Y',0x59),K('U',0x55),K('I',0x49),K('O',0x4F),K('P',0x50),
+      K('[{',0xDB),K(']}',0xDD),K('\\|',0xDC,1.45),
     ] },
     { keys: [
-      K('PgUp',0x21,1.3,'fn'),K('PgDn',0x22,1.3,'fn'),
-      K('-',0xBD,1,'fn'),K('=',0xBB,1,'fn'),
-      K('/',0xBF,1,'fn'),K('\\',0xDC,1,'fn'),
+      K('帽',0x14,1.85,'fn'),
+      K('A',0x41),K('S',0x53),K('D',0x44),K('F',0x46,1,'home'),K('G',0x47),
+      K('H',0x48),K('J',0x4A,1,'home'),K('K',0x4B),K('L',0x4C),
+      K(';:',0xBA),K('"\'',0xDE),K('进来',0x0D,2.3,'fn'),
     ] },
     { keys: [
-      K('ABC',-1,1.4,'mod'),K('空格',0x20,4.2,'space'),K('回车',0x0D,1.7,'fn'),
+      K('换班',0x10,2.35,'mod'),
+      K('Z',0x5A),K('X',0x58),K('C',0x43),K('V',0x56),K('B',0x42),
+      K('N',0x4E),K('M',0x4D),K(',<',0xBC),K('.>',0xBE),K('/?',0xBF),
+      K('换班',0x10,2.35,'mod'),K('↑',0x26,1,'fn'),
+    ] },
+    { keys: [
+      K('Ctrl',0x11,1.35,'mod'),K('胜利',0x5B,1.05,'mod'),K('替代',0x12,1.05,'mod'),
+      K('空间',0x20,6.6,'space'),
+      K('替代',0x12,1.05,'mod'),K('注',0x15,1.05,'fn'),K('菜单',0x5D,1.05,'fn'),
+      K('Ctrl',0x11,1.35,'mod'),
+      K('←',0x25,1,'fn'),K('↓',0x28,1,'fn'),K('→',0x27,1,'fn'),
     ] },
   ];
 
@@ -818,10 +865,6 @@
   }
 
   function pressKey(vk, btn) {
-    if (vk === -1) {                       // 层切换键
-      setLayer(curLayer === 'main' ? 'fn' : 'main');
-      return;
-    }
     const modName = MOD_NAME[vk];
     if (modName) {                         // 修饰键：点一下点亮，再点取消
       const idx = stickyMods.indexOf(modName);
@@ -842,12 +885,11 @@
     if (navigator.vibrate) navigator.vibrate(8);
   }
 
-  function renderKeys(container, layerName, bindClick) {
+  function renderKeys(container, bindClick) {
     container.innerHTML = '';
-    const rows = layerName === 'fn' ? LAYER_FN : LAYER_MAIN;
-    rows.forEach((row) => {
+    LAYER_MAIN.forEach((row) => {
       const r = document.createElement('div');
-      r.className = 'kbrow' + (row.cls ? ' ' + row.cls : '');
+      r.className = 'kbrow';
       if (row.h) r.style.flexGrow = String(row.h);
       row.keys.forEach((key) => {
         const b = document.createElement('button');
@@ -863,16 +905,10 @@
   }
 
   function renderAll() {
-    renderKeys(kbPad, curLayer, true);
+    renderKeys(kbPad, true);
     // 全屏/分屏键盘不绑 click：由手势层判定「轻点 = 按键」，否则滑动手势会误触
-    renderKeys(kfPadEl, curLayer, false);
-    renderKeys(spKeysEl, curLayer, true);
-  }
-
-  function setLayer(name) {
-    curLayer = name;
-    clearSticky();
-    renderAll();
+    renderKeys(kfPadEl, false);
+    renderKeys(spKeysEl, true);
   }
 
   renderAll();
@@ -898,6 +934,8 @@
   const kfCentY = () => { let s = 0; for (const p of kfPts.values()) s += p.y; return kfPts.size ? s / kfPts.size : 0; };
 
   kbfull.addEventListener('pointerdown', (e) => {
+    // 顶部的模式切换按钮 / 退出按钮交给原生点击，不要被手势层接管
+    if (e.target && e.target.closest && e.target.closest('.kfbar')) return;
     try { kbfull.setPointerCapture(e.pointerId); } catch (_) {}
     kfPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -971,19 +1009,11 @@
   kbfull.addEventListener('pointerup', kfUp);
   kbfull.addEventListener('pointercancel', kfUp);
 
-  document.getElementById('kfBtn').addEventListener('click', () => {
-    kb.classList.remove('open');
-    kbfull.classList.add('open');
-  });
-  document.getElementById('kfClose').addEventListener('click', () => kbfull.classList.remove('open'));
+  document.getElementById('kfClose').addEventListener('click', () => showMode('pad'));
 
   /* 分屏模式 */
   const splitmode = document.getElementById('splitmode');
-  document.getElementById('spBtn').addEventListener('click', () => {
-    kb.classList.remove('open');
-    splitmode.classList.add('open');
-  });
-  document.getElementById('spClose').addEventListener('click', () => splitmode.classList.remove('open'));
+  document.getElementById('spClose').addEventListener('click', () => showMode('pad'));
 
   /* 给小触控板用的简化手势（移动 / 轻点左键 / 双指滚动） */
   function attachPadArea(el) {
@@ -991,20 +1021,25 @@
     let mode = 'idle';
     let sx = 0, sy = 0, st = 0, lx = 0, ly = 0;
     let accX = 0, accY = 0, remX = 0, remY = 0, sc = 0, scRem = 0;
+    let twoPend = false, twoT = 0, twoMoved = 0;
 
     const cx = () => { let s = 0; for (const q of p.values()) s += q.x; return p.size ? s / p.size : 0; };
     const cy = () => { let s = 0; for (const q of p.values()) s += q.y; return p.size ? s / p.size : 0; };
 
     el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();          // 不要让事件冒泡到外层键盘手势层，否则光标会动两次
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
       p.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (p.size === 1) {
         mode = 'pending';
         sx = e.clientX; sy = e.clientY;
         lx = sx; ly = sy; st = performance.now();
+        twoPend = false;
       } else {
         mode = 'scroll';
         lx = cx(); ly = cy(); sc = 0; scRem = 0;
+        // 双指轻点 = 右键（和主触控板一致）
+        twoPend = true; twoT = performance.now(); twoMoved = 0;
       }
       e.preventDefault();
     }, { passive: false });
@@ -1028,10 +1063,13 @@
         const ny = cy();
         sc += ((ny - ly) / PX_PER_NOTCH) * S.speed;
         lx = cx(); ly = ny;
+        twoMoved += 1;
+        if (twoMoved > 12) twoPend = false;
       }
     }
 
     el.addEventListener('pointermove', (e) => {
+      e.stopPropagation();
       const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
       if (list && list.length > 1) { for (const ce of list) onMove(ce); }
       else onMove(e);
@@ -1040,9 +1078,13 @@
 
     function up(e) {
       if (!p.has(e.pointerId)) return;
+      e.stopPropagation();
       p.delete(e.pointerId);
       if (p.size === 0) {
-        if (mode === 'pending' && performance.now() - st < 320) click('l');
+        const twoTap = twoPend && performance.now() - twoT < 380;
+        twoPend = false;
+        if (twoTap) click('r');
+        else if (mode === 'pending' && performance.now() - st < 320) click('l');
         mode = 'idle';
       } else if (p.size === 1) {
         mode = 'move';
@@ -1092,8 +1134,8 @@
       TXT('y',0x59),TXT('u',0x55),TXT('i',0x49),TXT('o',0x4F),TXT('p',0x50),
     ] },
     { cls: 'indent1', keys: [
-      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),TXT('f',0x46),TXT('g',0x47),
-      TXT('h',0x48),TXT('j',0x4A),TXT('k',0x4B),TXT('l',0x4C),
+      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),K('f',0x46,1,'home'),TXT('g',0x47),
+      TXT('h',0x48),K('j',0x4A,1,'home'),TXT('k',0x4B),TXT('l',0x4C),
     ] },
     { cls: 'indent2', keys: [
       K('⇧',0x10,1.5,'mod'),TXT('z',0x5A),TXT('x',0x58),TXT('c',0x43),TXT('v',0x56),
@@ -1149,13 +1191,53 @@
     if (b && b.dataset.vk !== undefined) pressKey(parseInt(b.dataset.vk, 10), b);
   });
 
-  document.getElementById('trBtn').addEventListener('click', () => {
-    kb.classList.remove('open');
-    trmode.classList.add('open');
-  });
-  document.getElementById('trClose').addEventListener('click', () => trmode.classList.remove('open'));
+  document.getElementById('trClose').addEventListener('click', () => showMode('pad'));
 
   attachPadArea(document.getElementById('trPad'));
+
+  /* ---------------- 键盘形态切换：每种键盘里都能直接跳转 ---------------- */
+  const MODE_LABEL = { pad: '触控板', drawer: '抽屉', full: '全屏', split: '分屏', surround: '环绕' };
+
+  function showMode(name) {
+    kb.classList.remove('open');
+    kbfull.classList.remove('open');
+    splitmode.classList.remove('open');
+    trmode.classList.remove('open');
+    if (name === 'drawer') kb.classList.add('open');
+    else if (name === 'full') kbfull.classList.add('open');
+    else if (name === 'split') splitmode.classList.add('open');
+    else if (name === 'surround') trmode.classList.add('open');
+    clearSticky();
+    document.querySelectorAll('.modebar').forEach((bar) => {
+      bar.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('on', b.dataset.mode === name);
+      });
+    });
+    if (document.activeElement) document.activeElement.blur();
+  }
+
+  document.querySelectorAll('.modebar').forEach((bar) => {
+    Object.keys(MODE_LABEL).forEach((m) => {
+      const b = document.createElement('button');
+      b.className = 'mini';
+      b.textContent = MODE_LABEL[m];
+      b.dataset.mode = m;
+      b.addEventListener('click', (e) => { e.stopPropagation(); showMode(m); });
+      bar.appendChild(b);
+    });
+  });
+
+  /* 全屏键盘顶部的触控条：轻点左键 / 双指轻点右键 / 滑动移光标 / 双指滚动 */
+  attachPadArea(document.getElementById('kfStrip'));
+  document.getElementById('kfStrip').textContent = '';
+  const stripHint = document.createElement('span');
+  stripHint.textContent = '触控条 · 轻点=左键 · 双指轻点=右键 · 滑动=移光标';
+  stripHint.style.cssText = 'pointer-events:none;opacity:.75';
+  document.getElementById('kfStrip').appendChild(stripHint);
+
+  // 支持 ?mode=drawer/full/split/surround 直接进入某个形态（可以收藏）
+  const initialMode = new URLSearchParams(location.search).get('mode');
+  if (initialMode && MODE_LABEL[initialMode]) showMode(initialMode);
 
   let lastText = '';
   ta.addEventListener('input', (e) => {
