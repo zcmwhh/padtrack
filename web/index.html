@@ -80,6 +80,11 @@
     white-space: nowrap; font-size: 12px; color: #9fb0c2;
     padding: 0 8px 0 10px; align-self: center;
   }
+  #musicCover {
+    display: none; width: 26px; height: 26px; border-radius: 6px;
+    object-fit: cover; align-self: center; margin-left: 6px;
+  }
+  #musicCover.on { display: block; }
 
   /* 触摸板模式的九宫格数字键盘：常驻显示，未激活时只是背景（不拦触摸） */
   #numpad {
@@ -314,7 +319,7 @@
 <div id="pad">
   <div id="hint">
     <b>单指</b>移动 · <b>轻点</b>左键 · <b>双击后拖</b>或按住拖<br>
-    <b>双指</b>滚动 · <b>双指捏合</b>缩放 · <b>双指轻点</b>右键 · 右上角 <b>✋</b> 锁定拖动<br>
+    <b>双指</b>滚动 · <b>双指捏合</b>缩放 · <b>双指轻点</b>右键<br>
     <b>三指</b>左右切换窗口 · 上滑任务视图 · 下滑显示桌面
   </div>
 </div>
@@ -323,6 +328,7 @@
 <div id="tip"></div>
 
 <div id="musicbar">
+  <img id="musicCover" alt="" />
   <span id="musicTitle">—</span>
   <button data-media="177" title="上一首">⏮</button>
   <button data-media="179" title="播放/暂停">⏯</button>
@@ -332,8 +338,7 @@
 <div id="numpad"></div>
 
 <div class="topbar">
-  <button class="round" id="numBtn" title="数字键盘">123</button>
-  <button class="round" id="lockBtn" title="拖动锁定">✋</button>
+  <button class="round" id="numBtn" title="数字键盘">▦</button>
   <button class="round" id="kbBtn" title="键盘">⌨</button>
   <button class="round" id="gear" title="设置">⚙</button>
 </div>
@@ -504,8 +509,8 @@
   const down = (b) => send({ t: 'd', b });
   const up = (b) => send({ t: 'u', b });
   // 拖动锁定期间不要重复按下/松开左键，否则会把锁定状态冲掉
-  const pressLeft = () => { if (!lockOn) down('l'); };
-  const releaseLeft = () => { if (!lockOn) up('l'); };
+  const pressLeft = () => down('l');
+  const releaseLeft = () => up('l');
 
   const tipEl = document.getElementById('tip');
   let tipTimer = 0;
@@ -562,26 +567,36 @@
 
   /* ---------------- 媒体信息：轮询电脑上正在播放的曲目 ---------------- */
   const musicTitle = document.getElementById('musicTitle');
+  const musicCover = document.getElementById('musicCover');
   let lastMedia = '';
   async function pollMedia() {
     try {
       const r = await fetch(`/media?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       if (!r.ok) return;
       const d = await r.json();
-      const key = (d.title || '') + '|' + (d.artist || '') + '|' + (d.status || '');
+      const key = (d.title || '') + '|' + (d.artist || '') + '|' + (d.status || '') + '|' + (d.cover || '');
       if (key === lastMedia) return;
       lastMedia = key;
       if (!d.title) {
         musicTitle.textContent = d.status === 'none' ? '未在播放' : '—';
         musicTitle.title = '';
+        musicCover.classList.remove('on');
+        musicCover.removeAttribute('src');
       } else {
         musicTitle.textContent = d.artist ? `${d.title} · ${d.artist}` : d.title;
         musicTitle.title = musicTitle.textContent;
+        if (d.cover) {
+          musicCover.src = `/cover?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(d.cover)}`;
+          musicCover.classList.add('on');
+        } else {
+          musicCover.classList.remove('on');
+          musicCover.removeAttribute('src');
+        }
       }
     } catch (_) {}
   }
   pollMedia();
-  setInterval(pollMedia, 4000);
+  setInterval(pollMedia, 5000);
 
   pad.addEventListener('pointerdown', (e) => {
     if (!connected) return;
@@ -595,7 +610,7 @@
       twoTapPending = false;
       swipe3Pending = false;
       lastCX = e.clientX; lastCY = e.clientY;
-      if (performance.now() - lastTapEnd < 500 && !lockOn) {
+      if (performance.now() - lastTapEnd < 500) {
         // 双击的第二下：先不按左键，等手指一动才发 dblstart。
         // dblstart 会先挪 8px 再按下，破坏双击的位置容差，
         // 所以拖的时候标题栏不会被判成双击最大化；
@@ -727,12 +742,11 @@
 
       if (mode === 'pending') {
         if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
-          if (lockOn) setLock(false);   // 锁定状态下轻点 = 松开
-          else { click('l'); lastTapEnd = now; }
+          click('l'); lastTapEnd = now;
         }
       } else if (mode === 'armed') {
         // 第二下没有移动就松开 = 普通的第二次单击，双击（如标题栏最大化）照常
-        if (lockOn) setLock(false); else click('l');
+        click('l');
       } else if (mode === 'drag') {
         releaseLeft();
       } else if (swipe3Pending && threeStart) {
@@ -904,28 +918,6 @@
 
   document.getElementById('gear').addEventListener('click', () => panel.classList.toggle('open'));
 
-  /* 拖动锁定：点一下按住左键，自由拖动，再点一下松开。
-     用于「双击拖」被 Windows 判成双击最大化 的场合。 */
-  let lockOn = false, lockTimer = 0;
-  const lockBtn = document.getElementById('lockBtn');
-
-  function setLock(on) {
-    if (on === lockOn) return;
-    lockOn = on;
-    clearTimeout(lockTimer);
-    if (on) {
-      down('l');
-      flash('左键已按住，直接拖');
-      lockTimer = setTimeout(() => { setLock(false); flash('已自动松开'); }, 20000);
-    } else {
-      up('l');
-      flash('已松开');
-    }
-    lockBtn.classList.toggle('on', on);
-  }
-
-  lockBtn.addEventListener('click', () => setLock(!lockOn));
-  ws.addEventListener?.('close', () => setLock(false));
   document.getElementById('full').addEventListener('click', () => {
     const el = document.documentElement;
     if (!document.fullscreenElement) el.requestFullscreen?.().catch(() => {});

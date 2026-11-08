@@ -24,6 +24,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 import threading
 import time
 from ctypes import wintypes
@@ -374,17 +376,120 @@ if ($null -eq $s) {
 
 _media_lock = threading.Lock()
 _media_cache = {"t": 0.0, "data": {"title": "", "artist": "", "status": ""}}
+_cover_cache = {}          # "title|artist" -> bytes
+_COVER_MAX = 24
+
+PLAYER_PROCS = (
+    "cloudmusic.exe", "cloudmusic_reporter.exe", "qqmusic.exe", "kugou.exe",
+    "spotify.exe", "music.ui.exe", "wmplayer.exe", "foobar2000.exe", "aimp.exe",
+)
+
+
+def _exe_name(pid):
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.QueryFullProcessImageNameW.argtypes = (
+        wintypes.HANDLE, wintypes.DWORD, ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD))
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    h = k32.OpenProcess(0x1000, False, pid)
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(1024)
+        if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            return os.path.basename(buf.value).lower()
+        return ""
+    finally:
+        k32.CloseHandle(h)
+
+
+def player_window_title():
+    """从正在播放的软件窗口标题里取「歌名 - 歌手」。
+
+    网易云这类不注册系统媒体控制的播放器，只能这样拿。
+    """
+    u32 = ctypes.WinDLL("user32")
+    u32.EnumWindows.argtypes = (ctypes.c_void_p, wintypes.LPARAM)
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _):
+        if not u32.IsWindowVisible(hwnd):
+            return True
+        n = u32.GetWindowTextLengthW(hwnd)
+        if n <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 2)
+        u32.GetWindowTextW(hwnd, buf, n + 2)
+        title = buf.value.strip()
+        if not title:
+            return True
+        pid = wintypes.DWORD()
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if _exe_name(pid.value) in PLAYER_PROCS:
+            found.append(title)
+        return True
+
+    u32.EnumWindows(cb, 0)
+    return found[0] if found else ""
+
+
+def split_song_title(raw):
+    t = raw
+    for suffix in (" - 网易云音乐", " - QQ音乐", " - 酷狗音乐", " - Spotify"):
+        if t.endswith(suffix):
+            t = t[: -len(suffix)]
+    if " - " in t:
+        name, artist = t.rsplit(" - ", 1)
+        return name.strip(), artist.strip()
+    return t.strip(), ""
+
+
+def netease_cover(title, artist):
+    """按歌名+歌手去网易云公开接口找封面，返回 JPEG/PNG 字节。"""
+    if not title:
+        return b""
+    hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/"}
+    try:
+        q = urllib.parse.quote(f"{title} {artist}".strip())
+        url = f"https://music.163.com/api/search/get/web?s={q}&type=1&limit=1&offset=0"
+        with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        songs = (data.get("result") or {}).get("songs") or []
+        if not songs:
+            return b""
+        sid = songs[0].get("id")
+        if not sid:
+            return b""
+        detail = f"https://music.163.com/api/song/detail/?id={sid}&ids=%5B{sid}%5D"
+        with urllib.request.urlopen(urllib.request.Request(detail, headers=hdr), timeout=5) as r:
+            d2 = json.loads(r.read().decode("utf-8", "replace"))
+        dsongs = d2.get("songs") or []
+        if not dsongs:
+            return b""
+        pic = (dsongs[0].get("album") or {}).get("picUrl")
+        if not pic:
+            return b""
+        pic = pic.split("?")[0] + "?param=200y200"
+        with urllib.request.urlopen(urllib.request.Request(pic, headers=hdr), timeout=6) as r:
+            return r.read()
+    except Exception:
+        return b""
 
 
 def query_media():
-    """当前播放曲目，带 2.5 秒缓存（每查一次要起一个 PowerShell，约 0.3 秒）。"""
-    if time.time() - _media_cache["t"] < 2.5:
+    """当前播放曲目，带 2.5 秒缓存。"""
+    if time.time() - _media_cache["t"] < 4.0:
         return _media_cache["data"]
 
     data = {"title": "", "artist": "", "status": ""}
     with _media_lock:
-        if time.time() - _media_cache["t"] < 2.5:      # 等锁期间别人刷过了
+        if time.time() - _media_cache["t"] < 4.0:
             return _media_cache["data"]
+
+        # 1) 先问系统媒体控制（Spotify / QQ 音乐新版 / 浏览器都走这条）
         try:
             script = os.path.join(tempfile.gettempdir(), "padtrack_media.ps1")
             if not os.path.exists(script):
@@ -402,6 +507,27 @@ def query_media():
                     break
         except Exception:
             pass
+
+        # 2) 拿不到就从播放器窗口标题里抠（网易云走这条）
+        if not data.get("title"):
+            raw = player_window_title()
+            if raw:
+                t, a = split_song_title(raw)
+                if t:
+                    data = {"title": t, "artist": a, "status": "Playing"}
+
+        # 3) 封面
+        key = f"{data.get('title','')}|{data.get('artist','')}"
+        if data.get("title"):
+            if key not in _cover_cache:
+                img = netease_cover(data.get("title", ""), data.get("artist", ""))
+                if img:
+                    if len(_cover_cache) >= _COVER_MAX:
+                        _cover_cache.clear()
+                    _cover_cache[key] = img
+            if key in _cover_cache:
+                data["cover"] = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+
         _media_cache["t"] = time.time()
         _media_cache["data"] = data
         return data
@@ -462,6 +588,19 @@ class Handler(socketserver.BaseRequestHandler):
                     return
                 body = json.dumps(query_media(), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/cover":
+                if key != KEY:
+                    self._http(sock, 403, b"", "text/plain")
+                    return
+                want = params.get("h", [""])[0]
+                for k, img in list(_cover_cache.items()):
+                    if hashlib.md5(k.encode("utf-8")).hexdigest()[:12] == want:
+                        ctype = "image/png" if img[:4] == b"\x89PNG" else "image/jpeg"
+                        self._http(sock, 200, img, ctype)
+                        return
+                self._http(sock, 404, b"", "text/plain")
                 return
 
             self._http(sock, 404, b"not found")
