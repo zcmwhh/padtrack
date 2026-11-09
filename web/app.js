@@ -1932,7 +1932,7 @@
     if (KB_MODES.includes(name)) {
       try { localStorage.setItem(KB_STORE, name); } catch (_) {}
     }
-    if (name === 'full' && typeof placeNub === 'function') setTimeout(placeNub, 60);
+    if (name === 'full') setTimeout(() => { try { applySavedNub(); } catch (_) {} }, 60);
     clearSticky();
     document.querySelectorAll('.modebar').forEach((bar) => {
       bar.querySelectorAll('button').forEach((b) => {
@@ -1977,11 +1977,78 @@
     kfNub.style.top = Math.round(cy - NH / 2 - host.top) + 'px';
   }
 
-  attachPadArea(kfNub);
-  kfNub.addEventListener('pointerdown', (e) => e.stopPropagation());
-  placeNub();
-  window.addEventListener('resize', placeNub);
-  setTimeout(placeNub, 300);
+  // 位置记忆：拖动过就记住，没拖过就每次按布局算
+  const NUB_STORE = 'padtrack.kfNubPos';
+  const NUB_SIZE = 46;
+  let nubSaved = null;
+  try { nubSaved = JSON.parse(localStorage.getItem(NUB_STORE) || 'null'); } catch (_) {}
+
+  function clampNub(left, top) {
+    const host = kbfull.getBoundingClientRect();
+    return [
+      Math.max(4, Math.min(host.width - NUB_SIZE - 4, left)),
+      Math.max(4, Math.min(host.height - NUB_SIZE - 4, top)),
+    ];
+  }
+
+  function applySavedNub() {
+    if (!nubSaved) { placeNub(); return; }
+    const [l, t] = clampNub(nubSaved.left, nubSaved.top);
+    kfNub.style.left = l + 'px';
+    kfNub.style.top = t + 'px';
+  }
+
+  // 只有轻点算点击；按住拖动 = 挪球，不触发点击
+  let nubDownT = 0, nubStart = null, nubDragging = false;
+  kfNub.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try { kfNub.setPointerCapture(e.pointerId); } catch (_) {}
+    nubDownT = performance.now();
+    nubDragging = false;
+    const host = kbfull.getBoundingClientRect();
+    const r = kfNub.getBoundingClientRect();
+    nubStart = { x: e.clientX, y: e.clientY, left: r.left - host.left, top: r.top - host.top };
+    kfNub.classList.add('down');
+  });
+  kfNub.addEventListener('pointermove', (e) => {
+    if (!nubStart) return;
+    e.stopPropagation();
+    const dx = e.clientX - nubStart.x;
+    const dy = e.clientY - nubStart.y;
+    if (!nubDragging && Math.hypot(dx, dy) > 10) {
+      nubDragging = true;
+      kfNub.classList.add('drag');
+    }
+    if (nubDragging) {
+      const [l, t] = clampNub(nubStart.left + dx, nubStart.top + dy);
+      kfNub.style.left = l + 'px';
+      kfNub.style.top = t + 'px';
+    }
+  });
+  const nubEnd = (e) => {
+    if (!nubStart) return;
+    e.stopPropagation();
+    const held = performance.now() - nubDownT;
+    kfNub.classList.remove('down', 'drag');
+    if (nubDragging) {
+      // 记住新位置，下次打开还在原处
+      nubSaved = { left: parseInt(kfNub.style.left, 10) || 0,
+                   top: parseInt(kfNub.style.top, 10) || 0 };
+      try { localStorage.setItem(NUB_STORE, JSON.stringify(nubSaved)); } catch (_) {}
+    } else if (held < 600) {
+      click('l');                      // 轻点 = 左键
+      if (navigator.vibrate) navigator.vibrate(8);
+    }
+    nubStart = null;
+    nubDragging = false;
+  };
+  kfNub.addEventListener('pointerup', nubEnd);
+  kfNub.addEventListener('pointercancel', nubEnd);
+
+  applySavedNub();
+  window.addEventListener('resize', () => { if (!nubSaved) placeNub(); else applySavedNub(); });
+  setTimeout(applySavedNub, 300);
 
   attachPadArea(document.getElementById('kfStrip'));
   document.getElementById('kfStrip').textContent = '';
