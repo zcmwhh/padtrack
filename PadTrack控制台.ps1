@@ -926,6 +926,15 @@ $ui.OnAction = [Func[string, bool]]{
     switch ($key) {
         'start' {
             if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $here }
+            # 起完顺手补上 USB 映射（接着线的场景就不用再点一次）
+            Start-Sleep -Milliseconds 1500
+            $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
+            if (Test-Path $adbExe) {
+                $devOut = & $adbExe devices 2>$null
+                if ($devOut -match '\sdevice$') {
+                    & $adbExe reverse tcp:8765 tcp:8765 *> $null
+                }
+            }
         }
         'startadmin' {
             if (Test-Path $exe) {
@@ -938,6 +947,12 @@ $ui.OnAction = [Func[string, bool]]{
                 if ($LASTEXITCODE -ne 0) {
                     try { Start-Process -FilePath (Join-Path $here '停止.bat') -Verb RunAs -WorkingDirectory $here } catch {}
                 }
+            }
+            # 先撤销 USB 映射（映射挂在 adb 守护进程里，杀掉就没了，
+            # 但显式撤销能让平板端马上释放 127.0.0.1:8765）
+            $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
+            if (Test-Path $adbExe) {
+                & $adbExe reverse --remove-all *> $null
             }
             # 本程序拉起来的 adb 守护进程也关掉，别留后台
             & taskkill /f /im adb.exe *> $null
