@@ -1056,6 +1056,26 @@
     });
   }
 
+  // 连接方式：页面地址 + 服务端看到的来源 IP，一眼看出走的是 USB 还是 WiFi
+  const connVal = document.getElementById('connVal');
+  async function paintConn() {
+    if (!connVal) return;
+    const here = location.host;
+    const local = /^(127\.0\.0\.1|localhost)(:|$)/.test(here);
+    let peer = '';
+    try {
+      const r = await fetch(`/diag?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (d.client) peer = d.client;
+    } catch (_) {}
+    const how = local || peer === '127.0.0.1' ? 'USB 直连' : 'WiFi';
+    connVal.textContent = how + '（' + here + '）';
+    connVal.title = '页面地址: ' + here + '\n服务端看到的来源: ' + (peer || '未知');
+    connVal.classList.toggle('on', how === 'USB 直连');
+  }
+  paintConn();
+  setInterval(paintConn, 5000);
+
   const lyrOnBox = document.getElementById('lyrOn');
   const lyrBgBox = document.getElementById('lyrBg');
   lyrOnBox.checked = S.lyrOn !== false;

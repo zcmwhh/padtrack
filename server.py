@@ -1364,7 +1364,8 @@ class Handler(socketserver.BaseRequestHandler):
                     body = json.dumps(inject_test(), ensure_ascii=False)
                 else:
                     body = json.dumps({"admin": is_admin(), "cursor": cursor_pos(),
-                                       "foreground": foreground_info()},
+                                       "foreground": foreground_info(),
+                                       "client": self.client_address[0]},
                                       ensure_ascii=False)
                 self._http(sock, 200, body.encode("utf-8"),
                            "application/json; charset=utf-8")
