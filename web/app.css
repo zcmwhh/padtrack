@@ -44,6 +44,21 @@ html.glass-light {
     -webkit-touch-callout: none;
     overscroll-behavior: none;
   }
+  /* 键盘与面板一律不可选中：安卓长按可选中文字会弹「复制/全选」 */
+  html, body, #kbfull, #kbfull *, #splitmode, #splitmode *,
+  #trmode, #trmode *, #numpad, #numpad *, .topbar, .topbar *,
+  #panel, #panel *, .kfbar, .kfbar * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none;
+  }
+  /* 唯一的例外：手动输入框要能编辑和选中 */
+  #ta, #ta * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    -webkit-touch-callout: default;
+  }
+
   /* 装饰性图片不参与指针事件：安卓长按 <img> 会弹「保存图片」 */
   img {
     -webkit-user-drag: none;
