@@ -1932,6 +1932,7 @@
     if (KB_MODES.includes(name)) {
       try { localStorage.setItem(KB_STORE, name); } catch (_) {}
     }
+    if (name === 'full' && typeof placeNub === 'function') setTimeout(placeNub, 60);
     clearSticky();
     document.querySelectorAll('.modebar').forEach((bar) => {
       bar.querySelectorAll('button').forEach((b) => {
@@ -1953,6 +1954,35 @@
   });
 
   /* 全屏键盘顶部的触控条：轻点左键 / 双指轻点右键 / 滑动移光标 / 双指滚动 */
+  // ---------------- 键盘中间的迷你触控点 ----------------
+  const kfNub = document.getElementById('kfNub');
+
+  // 量真实布局：放在 QWERTY 行与 ASDF 行之间的空隙里，横向对准 G 键
+  function placeNub() {
+    if (!kfNub) return;
+    const g = [...document.querySelectorAll('#kfPad .kbkey')]
+      .find((k) => k.textContent.trim() === 'G');
+    if (!g) return;
+    const row = g.parentElement;
+    const prev = row.previousElementSibling;
+    const gr = g.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    const pr = prev ? prev.getBoundingClientRect() : rr;
+    const host = kbfull.getBoundingClientRect();
+    // 空隙中线 = 上一行底部与本行顶部的中点
+    const cy = (pr.bottom + rr.top) / 2;
+    // 用固定尺寸算，别量还没渲染完的元素（量到 0 会偏）
+    const NW = 38, NH = 38;
+    kfNub.style.left = Math.round(gr.left + gr.width / 2 - NW / 2 - host.left) + 'px';
+    kfNub.style.top = Math.round(cy - NH / 2 - host.top) + 'px';
+  }
+
+  attachPadArea(kfNub);
+  kfNub.addEventListener('pointerdown', (e) => e.stopPropagation());
+  placeNub();
+  window.addEventListener('resize', placeNub);
+  setTimeout(placeNub, 300);
+
   attachPadArea(document.getElementById('kfStrip'));
   document.getElementById('kfStrip').textContent = '';
   const stripHint = document.createElement('span');
