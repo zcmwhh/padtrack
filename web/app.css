@@ -114,7 +114,29 @@
   }
   #island.exp {
     width: min(94vw, 392px); height: 96px; border-radius: 30px;
-    background: rgba(13, 18, 24, .94);
+    /* 留出透明度，让下面的封面图层透上来 */
+    background: rgba(13, 18, 24, .74);
+  }
+
+  /* 展开态（二级菜单）的封面模糊背景 */
+  .isle-art {
+    position: absolute; inset: 0; z-index: 0;
+    pointer-events: none; overflow: hidden;
+    opacity: 0;
+    transition: opacity var(--t-mid) var(--ease-out);
+  }
+  html.art-on #island.exp .isle-art { opacity: 1; }
+  .isle-art::before {
+    content: ''; position: absolute; inset: -22%;
+    background: var(--art-url, none) center / cover no-repeat;
+    /* 面板小，模糊半径比整页小，否则糊成一团没有层次 */
+    filter: blur(26px) saturate(1.65) brightness(.86);
+    transform: scale(1.12);
+  }
+  .isle-art::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg,
+      rgba(9, 12, 17, .46) 0%, rgba(9, 12, 17, .76) 100%);
   }
 
   .isle-compact, .isle-full {
