@@ -1685,6 +1685,16 @@
       lastShiftTap = now;
     }
 
+    // 右 Shift：点一下 = 输入法中英文切换（不进粘滞修饰键列表）
+    if (vk === 0x10 && btn && btn.classList.contains('shiftr')) {
+      send({ t: 'ime' });
+      flash('中 / 英');
+      btn.classList.add('hit');
+      setTimeout(() => btn.classList.remove('hit'), 110);
+      if (navigator.vibrate) navigator.vibrate(10);
+      return;
+    }
+
     const modName = MOD_NAME[vk];
     if (modName) {                         // 修饰键：点一下点亮，再点取消
       const idx = stickyMods.indexOf(modName);
@@ -1729,6 +1739,9 @@
           b.appendChild(led);
           b.classList.toggle('capson', capsOn);
         }
+        // 右 Shift 单独标记：点一下切换输入法中英文
+        if (key.vk === 0x10 && b.classList.contains('mod')
+            && !b.classList.contains('shiftl')) b.classList.add('shiftr');
         b.dataset.vk = key.vk;
         if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
         r.appendChild(b);

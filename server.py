@@ -208,6 +208,17 @@ def act_drag_start():
     _mouse(-8, -8, 0, MOUSEEVENTF_MOVE)
 
 
+def act_ime_toggle():
+    """右 Shift 点按：输入法把"单独按一下 Shift"当作中英文切换。
+
+    按下与松开之间留 40ms，输入法才认得出这是一次独立点按，
+    而不是某个组合键的前半截。
+    """
+    _key(VK["shift"], 0, 0)
+    time.sleep(0.04)
+    _key(VK["shift"], 0, KEYEVENTF_KEYUP)
+
+
 def act_tap(vk):
     _key(vk, 0, 0)
     _key(vk, 0, KEYEVENTF_KEYUP)
@@ -296,6 +307,9 @@ def handle_message(msg):
         out["t"] = "vol"
         out["ok"] = bool(ok and out.get("ok"))
         return out
+    elif t == "ime":
+        # 右 Shift：中英文切换
+        act_ime_toggle()
     elif t == "ping":
         return {"t": "pong", "ts": msg.get("ts", 0)}
     return None
