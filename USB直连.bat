@@ -26,6 +26,9 @@ if not exist "%ADB%" goto :no_adb
 
 echo.
 echo === 检查平板连接 ===
+rem 先清掉可能卡死的 adb 进程：服务端卡住时 adb devices 会一直等，表现为脚本没反应
+taskkill /f /im adb.exe >nul 2>nul
+ping -n 2 127.0.0.1 >nul
 "%ADB%" start-server >nul 2>nul
 set "DEV="
 for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
