@@ -8,7 +8,17 @@ set "TMP=%~dp0tools\tmp"
 set "TEMP=%~dp0tools\tmp"
 
 set "ADB=%~dp0tools\platform-tools\adb.exe"
-if exist "%ADB%" goto :have_adb
+set "ADBDLL=%~dp0tools\platform-tools\AdbWinApi.dll"
+rem adb 依赖同目录的 AdbWinApi.dll / AdbWinUsbApi.dll；
+rem 只有 exe 没有 dll 时直接跑会弹「找不到 AdbWinApi.dll」，所以要一起检查
+if not exist "%ADB%" goto :need_download
+if not exist "%ADBDLL%" goto :incomplete
+goto :have_adb
+:incomplete
+echo 检测到 adb 不完整（缺 AdbWinApi.dll），重新下载 platform-tools...
+rmdir /s /q "%~dp0tools\platform-tools" >nul 2>nul
+goto :need_download
+:need_download
 
 echo 没有找到 adb，尝试下载 platform-tools...
 if not exist "%~dp0tools" mkdir "%~dp0tools" >nul 2>nul
