@@ -94,6 +94,7 @@
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
   const kfPts = new Map();
   let kfMode = 'idle', kfTapEl = null, kfStartT = 0, kfMoved = 0;
+  let kf3T = 0, kf3dx = 0, kf3dy = 0, kf3x0 = 0, kf3y0 = 0;   // 三指手势
   let kfSX = 0, kfSY = 0, kfLastX = 0, kfLastY = 0;
   let kfAccX = 0, kfAccY = 0, kfRemX = 0, kfRemY = 0;
   let kfScroll = 0, kfScrollRem = 0;
@@ -1536,11 +1537,18 @@
       kfSX = e.clientX; kfSY = e.clientY;
       kfLastX = kfSX; kfLastY = kfSY;
       kfTapEl = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
-    } else {
+    } else if (kfPts.size === 2) {
       kfMode = 'scroll';
       kfTapEl = null;
       kfLastX = kfCentX(); kfLastY = kfCentY();
       kfScroll = 0; kfScrollRem = 0;
+    } else {
+      // 三指：不滚动，改成手势（开始菜单 / 任务视图 / 切窗口）
+      kfMode = 'three';
+      kfTapEl = null;
+      kf3T = performance.now();
+      kf3x0 = kfCentX(); kf3y0 = kfCentY();
+      kf3dx = 0; kf3dy = 0;
     }
     e.preventDefault();
   }, { passive: false });
@@ -1568,6 +1576,11 @@
       const cx = kfCentX(), cy = kfCentY();
       kfScroll += ((cy - kfLastY) / PX_PER_NOTCH) * S.speed;
       kfLastX = cx; kfLastY = cy;
+    } else if (kfPts.size >= 3 && kfMode === 'three') {
+      const dx = kfCentX() - kf3x0;
+      const dy = kfCentY() - kf3y0;
+      if (Math.abs(dx) > Math.abs(kf3dx)) kf3dx = dx;
+      if (Math.abs(dy) > Math.abs(kf3dy)) kf3dy = dy;
     }
   }
 
@@ -1583,7 +1596,30 @@
     kfPts.delete(e.pointerId);
 
     if (kfPts.size === 0) {
-      if (kfMode === 'tap' && kfTapEl && performance.now() - kfStartT < 600) {
+      if (kfMode === 'three') {
+        const dur = performance.now() - kf3T;
+        const moved = Math.hypot(kf3dx, kf3dy);
+        if (moved < 26 && dur < 420) {
+          send({ t: 'k', vk: 0x5B });                       // 开始菜单
+          flash('开始菜单');
+        } else if (Math.abs(kf3dy) > Math.abs(kf3dx) && Math.abs(kf3dy) > 60) {
+          if (kf3dy < 0) {
+            send({ t: 'ks', mods: ['win'], vk: 0x09 });     // 任务视图
+            flash('任务视图');
+          } else {
+            send({ t: 'ks', mods: ['win'], vk: 0x44 });     // 显示桌面
+            flash('显示桌面');
+          }
+        } else if (Math.abs(kf3dx) > 60) {
+          if (kf3dx < 0) {
+            send({ t: 'ks', mods: ['alt'], vk: 0x09 });     // 下一个窗口
+            flash('下一个窗口');
+          } else {
+            send({ t: 'ks', mods: ['alt', 'shift'], vk: 0x09 });
+            flash('上一个窗口');
+          }
+        }
+      } else if (kfMode === 'tap' && kfTapEl && performance.now() - kfStartT < 600) {
         pressKey(parseInt(kfTapEl.dataset.vk, 0), kfTapEl);
       }
       kfMode = 'idle';
@@ -1747,29 +1783,40 @@
   const trmode = document.getElementById('trmode');
 
   const TRIP_TOP = [
-    { h: 0.82, keys: [
-      TXT('1',0x31),TXT('2',0x32),TXT('3',0x33),TXT('4',0x34),TXT('5',0x35),
-      TXT('6',0x36),TXT('7',0x37),TXT('8',0x38),TXT('9',0x39),TXT('0',0x30),
-    ] },
+    // 第 1 行：`~ 1…0 - = ⌫
     { keys: [
-      TXT('q',0x51),TXT('w',0x57),TXT('e',0x45),TXT('r',0x52),TXT('t',0x54),
-      TXT('y',0x59),TXT('u',0x55),TXT('i',0x49),TXT('o',0x4F),TXT('p',0x50),
+      K('`~',0xC0,1,'fn'),TXT('1!',0x31),TXT('2@',0x32),TXT('3#',0x33),TXT('4$',0x34),
+      TXT('5%',0x35),TXT('6^',0x36),TXT('7&',0x37),TXT('8*',0x38),TXT('9(',0x39),
+      TXT('0)',0x30),K('- _',0xBD,1,'fn'),K('= +',0xBB,1,'fn'),K('⌫',0x08,1.7,'fn'),
     ] },
-    { cls: 'indent1', keys: [
-      TXT('a',0x41),TXT('s',0x53),TXT('d',0x44),K('f',0x46,1,'home'),TXT('g',0x47),
-      TXT('h',0x48),K('j',0x4A,1,'home'),TXT('k',0x4B),TXT('l',0x4C),
-    ] },
-    { cls: 'indent2', keys: [
-      K('⇧',0x10,1.5,'mod'),TXT('z',0x5A),TXT('x',0x58),TXT('c',0x43),TXT('v',0x56),
-      TXT('b',0x42),TXT('n',0x4E),TXT('m',0x4D),TXT(',',0xBC),TXT('.',0xBE),
-      K('⌫',0x08,1.45,'fn'),
-    ] },
+    // 第 2 行：Tab + Q…P + [ ] \
     { keys: [
-      K('空格',0x20,5.2,'space'),K('回车',0x0D,1.8,'fn'),
+      K('Tab',0x09,1.45,'fn'),TXT('Q',0x51),TXT('W',0x57),TXT('E',0x45),TXT('R',0x52),
+      TXT('T',0x54),TXT('Y',0x59),TXT('U',0x55),TXT('I',0x49),TXT('O',0x4F),
+      TXT('P',0x50),K('[{',0xDB,1,'fn'),K(']}',0xDD,1,'fn'),K('\\|',0xDC,1.35,'fn'),
+    ] },
+    // 第 3 行：Caps + A…L + ; ' + 回车
+    { keys: [
+      K('Caps',0x14,1.75,'fn'),TXT('A',0x41),TXT('S',0x53),TXT('D',0x44),
+      K('F',0x46,1,'home'),TXT('G',0x47),TXT('H',0x48),K('J',0x4A,1,'home'),
+      TXT('K',0x4B),TXT('L',0x4C),K(';:',0xBA,1,'fn'),K("'\"",0xDE,1,'fn'),
+      K('回车',0x0D,2,'fn'),
+    ] },
+    // 第 4 行：Shift + Z…M + , . / + Shift
+    { keys: [
+      K('Shift',0x10,2.15,'mod'),TXT('Z',0x5A),TXT('X',0x58),TXT('C',0x43),TXT('V',0x56),
+      TXT('B',0x42),TXT('N',0x4E),TXT('M',0x4D),K(',<',0xBC,1,'fn'),K('.>',0xBE,1,'fn'),
+      K('/?',0xBF,1,'fn'),K('Shift',0x10,2.15,'mod'),
+    ] },
+    // 第 5 行：Ctrl Win Alt 空格 Alt Fn 菜单 Ctrl
+    { keys: [
+      K('Ctrl',0x11,1.35,'mod'),K('Win',0x5B,1.2,'mod'),K('Alt',0x12,1.2,'mod'),
+      K('空格',0x20,6.4,'space'),K('Alt',0x12,1.2,'mod'),K('Fn',0xFF,1,'fn'),
+      K('菜单',0x5D,1.15,'fn'),K('Ctrl',0x11,1.35,'mod'),
     ] },
   ];
 
-  const TRIP_LEFT = [['Esc',0x1B],['Tab',0x09],['Win',0x5B],['Ctrl',0x11],['Alt',0x12],['Del',0x2E]];
+  const TRIP_LEFT = [['Esc',0x1B],['Del',0x2E],['Insert',0x2D]];
   const TRIP_RIGHT = [['←',0x25],['↑',0x26],['↓',0x28],['→',0x27],
                       ['Home',0x24],['End',0x23],['PgUp',0x21],['PgDn',0x22]];
 
