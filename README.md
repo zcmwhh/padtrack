@@ -102,7 +102,8 @@ netsh advfirewall firewall add rule name="PadTrack" dir=in action=allow protocol
 | 环绕 | 上方 5 行标准键盘（`~ / Tab / Caps / Shift / Ctrl 行完整）+ 下方 3:2 触控板 + 两侧功能区（Esc·Del·Insert / 方向键·Home·End·PgUp·PgDn） | 长时间打字 |
 
 **每种键盘顶部都有形态切换条**（触控板 / 抽屉 / 全屏 / 分屏 / 环绕），在哪个模式里都能直接跳转，
-不用退回主界面。也可以直接用网址进入某个形态，方便收藏：
+不用退回主界面。**右上角的键盘按钮会记住你上次用的形态**——用过全屏，下次点它直接就是全屏，
+再点一下收回。也可以直接用网址进入某个形态，方便收藏：
 
 ```
 http://192.168.1.10:8765/?k=4821&mode=drawer     # 抽屉

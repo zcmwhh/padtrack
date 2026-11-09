@@ -1525,10 +1525,33 @@
 
   renderAll();
 
+  // ---------------- 记住上次用的键盘形态 ----------------
+  const KB_STORE = 'padtrack.kbMode';
+  const KB_MODES = ['drawer', 'full', 'split', 'surround'];
+
+  function savedKbMode() {
+    let m = null;
+    try { m = localStorage.getItem(KB_STORE); } catch (_) {}
+    return KB_MODES.includes(m) ? m : 'drawer';
+  }
+
+  // 当前开着哪种键盘（没开返回 'pad'）
+  function currentKbMode() {
+    if (kbfull.classList.contains('open')) return 'full';
+    if (splitmode.classList.contains('open')) return 'split';
+    if (trmode.classList.contains('open')) return 'surround';
+    if (kb.classList.contains('open')) return 'drawer';
+    return 'pad';
+  }
+
   document.getElementById('kbBtn').addEventListener('click', () => {
     collapsePlayer();
-    kb.classList.toggle('open');
-    if (kb.classList.contains('open') && document.activeElement) {
+    if (currentKbMode() !== 'pad') {     // 已经开着 → 收起
+      showMode('pad');
+      return;
+    }
+    showMode(savedKbMode());             // 没开 → 打开上次用的键盘
+    if (document.activeElement) {
       document.activeElement.blur();     // 不要唤起平板自己的输入法
     }
   });
@@ -1906,6 +1929,9 @@
     else if (name === 'full') kbfull.classList.add('open');
     else if (name === 'split') splitmode.classList.add('open');
     else if (name === 'surround') trmode.classList.add('open');
+    if (KB_MODES.includes(name)) {
+      try { localStorage.setItem(KB_STORE, name); } catch (_) {}
+    }
     clearSticky();
     document.querySelectorAll('.modebar').forEach((bar) => {
       bar.querySelectorAll('button').forEach((b) => {
@@ -1930,7 +1956,8 @@
   attachPadArea(document.getElementById('kfStrip'));
   document.getElementById('kfStrip').textContent = '';
   const stripHint = document.createElement('span');
-  stripHint.textContent = '触控条 · 轻点=左键 · 双指轻点=右键 · 滑动=移光标';
+  stripHint.textContent =
+    '触控条 · 单指滑=移光标 · 轻点=左键 · 双指=滚动/右键 · 三指=开始菜单/任务视图/切窗口';
   stripHint.style.cssText = 'pointer-events:none;opacity:.75';
   document.getElementById('kfStrip').appendChild(stripHint);
 
