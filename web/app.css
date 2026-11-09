@@ -763,39 +763,53 @@
   #kbfull { position: fixed; }          /* 保证绝对定位的参照系 */
   .kf-nub {
     position: absolute; z-index: 5;
-    width: 46px; height: 46px; padding: 0;
+    width: 44px; height: 44px; padding: 0;
     border-radius: 50%;
-    /* 半透明乳白玻璃球 */
-    background: radial-gradient(circle at 34% 28%,
-                rgba(255, 255, 255, .55), rgba(255, 255, 255, .16) 62%,
-                rgba(255, 255, 255, .08) 100%);
-    border: 1px solid rgba(255, 255, 255, .5);
-    backdrop-filter: blur(6px) saturate(1.15);
-    -webkit-backdrop-filter: blur(6px) saturate(1.15);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, .38),
-                inset 0 1px 3px rgba(255, 255, 255, .55),
-                inset 0 -2px 6px rgba(0, 0, 0, .12);
+    /* 和 HUD / 右上角按钮同一套毛玻璃 */
+    background:
+      radial-gradient(circle at 50% 18%,
+        rgba(255, 255, 255, .18), rgba(255, 255, 255, 0) 62%),
+      rgba(22, 30, 40, .72);
+    border: 1px solid rgba(120, 150, 180, .24);
+    backdrop-filter: blur(10px) saturate(1.25);
+    -webkit-backdrop-filter: blur(10px) saturate(1.25);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .45),
+                inset 0 1px 0 rgba(255, 255, 255, .1),
+                inset 0 -3px 8px rgba(0, 0, 0, .25);
     touch-action: none; cursor: pointer;
-    transition: transform .16s var(--ease-spring),
-                box-shadow .2s ease, background .2s ease;
+    transition: transform .18s var(--ease-spring),
+                box-shadow .24s ease, border-color .24s ease,
+                background-color .24s ease;
   }
-  /* 高光小点，让它更像一颗球 */
-  .kf-nub::after {
-    content: ''; position: absolute; left: 28%; top: 22%;
-    width: 26%; height: 26%; border-radius: 50%;
-    background: rgba(255, 255, 255, .75); filter: blur(1px);
+  /* 内圈细环：让它看起来像一颗打磨过的按钮，而不是一块纯色圆斑 */
+  .kf-nub::before {
+    content: ''; position: absolute; inset: 5px;
+    border-radius: 50%;
+    border: 1px solid rgba(120, 150, 180, .16);
     pointer-events: none;
   }
-  .kf-nub.down {
-    transform: scale(.93);
-    background: radial-gradient(circle at 34% 28%,
-                rgba(255, 255, 255, .8), rgba(255, 255, 255, .3) 65%,
-                rgba(255, 255, 255, .16) 100%);
+  /* 中心薄荷绿小点：暗示"点我 = 左键" */
+  .kf-nub::after {
+    content: ''; position: absolute; left: 50%; top: 50%;
+    width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+    border-radius: 50%;
+    background: rgba(62, 207, 142, .85);
+    box-shadow: 0 0 8px rgba(62, 207, 142, .55);
+    pointer-events: none;
+    transition: transform .18s var(--ease-spring), box-shadow .24s ease;
   }
+  .kf-nub.down {
+    border-color: rgba(62, 207, 142, .55);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5),
+                0 0 0 4px rgba(62, 207, 142, .1),
+                inset 0 1px 0 rgba(255, 255, 255, .12);
+  }
+  .kf-nub.down::after { transform: scale(1.35); box-shadow: 0 0 12px rgba(62, 207, 142, .8); }
   .kf-nub.drag {
-    transform: scale(1.08);
-    box-shadow: 0 8px 26px rgba(0, 0, 0, .5),
-                inset 0 1px 3px rgba(255, 255, 255, .7);
+    transform: scale(1.07);
+    border-color: rgba(120, 150, 180, .38);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .55),
+                inset 0 1px 0 rgba(255, 255, 255, .14);
   }
 
   /* 分屏：键盘为主 + 小触控板 */
