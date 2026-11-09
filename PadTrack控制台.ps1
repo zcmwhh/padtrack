@@ -1,5 +1,5 @@
 ﻿# PadTrack 控制中心（自绘界面，风格对齐网页端）
-param([switch]$Test, [switch]$Compile)
+param([switch]$Test, [switch]$Compile, [switch]$DataTest)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
@@ -25,6 +25,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 public class PadButton
@@ -32,7 +33,7 @@ public class PadButton
     public string Key;
     public string Text;
     public Rectangle Rect;
-    public int Kind;          // 0=ghost 1=primary 2=danger
+    public int Kind;          // 0=ghost 1=primary 2=danger 3=窗口按钮
     public float Hover;
     public float Press;
     public bool Enabled = true;
@@ -41,34 +42,70 @@ public class PadButton
 public class PadCenter : Form
 {
     public List<PadButton> Buttons = new List<PadButton>();
-    public string[] Lines = new string[0];      // "标签|值|状态(ok/warn/dim)"
+    public List<PadButton> Caps = new List<PadButton>();
+    public string[] Lines = new string[0];
     public string LogText = "";
-    public float UiScale = 1f;
+    public Func<string, bool> OnAction = null;
 
-    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-    private int darkMode = 1;
-    public Func<string, bool> OnAction;
+    // 设计尺寸：所有坐标按这个基准写，运行时整体缩放
+    public const float DesignW = 640f;
+    public const float DesignH = 700f;
+
+    public bool GlassOn = false;
 
     private int hot = -1, down = -1;
     private Timer anim;
     private Font fTitle, fSub, fLine, fLineB, fBtn, fLog, fTag;
     private Rectangle cardA, cardB;
+    private float scale = 1f, offX = 0f, offY = 0f;
 
     private static readonly Color Accent = Color.FromArgb(62, 207, 142);
     private static readonly Color TextMain = Color.FromArgb(226, 236, 246);
     private static readonly Color TextDim = Color.FromArgb(150, 165, 180);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MARGINS
+    {
+        public int Left; public int Right; public int Top; public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AccentPolicy
+    {
+        public int AccentState;
+        public int AccentFlags;
+        public int GradientColor;
+        public int AnimationId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowCompositionData
+    {
+        public int Attribute;
+        public IntPtr Data;
+        public int SizeOfData;
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
+    [DllImport("user32.dll")]
+    private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionData data);
+
+    private int darkMode = 1;
+
     public PadCenter()
     {
         Text = "PadTrack 控制中心";
-        ClientSize = new Size(640, 700);
-        AutoScaleMode = AutoScaleMode.None;
+        FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedSingle;
+        ClientSize = new Size((int)DesignW, (int)DesignH);
+        MinimumSize = new Size(560, 620);
         MaximizeBox = false;
         BackColor = Color.FromArgb(11, 15, 20);
         DoubleBuffered = true;
+        AutoScaleMode = AutoScaleMode.None;
         SetStyle(ControlStyles.AllPaintingInWmPaint
                | ControlStyles.OptimizedDoubleBuffer
                | ControlStyles.UserPaint, true);
@@ -82,19 +119,24 @@ public class PadCenter : Form
         fTag = new Font("Microsoft YaHei UI", 8f);
 
         cardA = new Rectangle(20, 92, 600, 176);
-        cardB = new Rectangle(20, 392, 600, 288);
+        cardB = new Rectangle(20, 404, 600, 276);
 
-        // 深色标题栏，和窗体内部统一
-        try
-        {
-            DwmSetWindowAttribute(Handle, 20, ref darkMode, sizeof(int));
-        }
-        catch { }
+        // 右上角三个窗口按钮
+        Caps.Add(MakeCap("min", 472, 14));
+        Caps.Add(MakeCap("max", 512, 14));
+        Caps.Add(MakeCap("close", 552, 14));
 
         anim = new Timer();
         anim.Interval = 16;
         anim.Tick += (s, e) => Tick();
         anim.Start();
+    }
+
+    private PadButton MakeCap(string key, int x, int y)
+    {
+        PadButton b = new PadButton();
+        b.Key = key; b.Rect = new Rectangle(x, y, 32, 32); b.Kind = 3;
+        return b;
     }
 
     public void AddButton(string key, string text, int x, int y, int w, int h, int kind)
@@ -107,9 +149,12 @@ public class PadCenter : Form
     private void Tick()
     {
         bool dirty = false;
-        for (int i = 0; i < Buttons.Count; i++)
+        List<PadButton> all = new List<PadButton>();
+        all.AddRange(Buttons);
+        all.AddRange(Caps);
+        for (int i = 0; i < all.Count; i++)
         {
-            PadButton b = Buttons[i];
+            PadButton b = all[i];
             float target = (i == hot && b.Enabled) ? 1f : 0f;
             float d = target - b.Hover;
             if (Math.Abs(d) > 0.01f) { b.Hover += d * 0.25f; dirty = true; }
@@ -123,10 +168,10 @@ public class PadCenter : Form
         if (dirty) Invalidate();
     }
 
-    private static GraphicsPath Round(Rectangle r, int rad)
+    private static GraphicsPath Round(RectangleF r, float rad)
     {
         GraphicsPath p = new GraphicsPath();
-        int d = rad * 2;
+        float d = rad * 2f;
         p.AddArc(r.X, r.Y, d, d, 180, 90);
         p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
         p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
@@ -145,17 +190,86 @@ public class PadCenter : Form
             (int)(a.B + (b.B - a.B) * t));
     }
 
+    private void ApplyGlass()
+    {
+        try
+        {
+            // 保留投影 + 系统圆角
+            MARGINS m = new MARGINS();
+            m.Left = 1; m.Right = 1; m.Top = 1; m.Bottom = 1;
+            DwmExtendFrameIntoClientArea(Handle, ref m);
+
+            int build = Environment.OSVersion.Version.Build;
+            if (build >= 22000)
+            {
+                int roundPref = 2;   // 大圆角
+                DwmSetWindowAttribute(Handle, 33, ref roundPref, sizeof(int));
+                int acrylic = 3;     // 亚克力
+                int code = DwmSetWindowAttribute(Handle, 38, ref acrylic, sizeof(int));
+                if (code == 0) { GlassOn = true; return; }
+            }
+
+            AccentPolicy ap = new AccentPolicy();
+            ap.AccentState = 4;
+            ap.AccentFlags = 2;
+            ap.GradientColor = unchecked((int)0xA80C1117);
+            int size = Marshal.SizeOf(ap);
+            IntPtr ptr = Marshal.AllocHGlobal(size);
+            Marshal.StructureToPtr(ap, ptr, false);
+            WindowCompositionData data = new WindowCompositionData();
+            data.Attribute = 19;
+            data.SizeOfData = size;
+            data.Data = ptr;
+            int hr = SetWindowCompositionAttribute(Handle, ref data);
+            Marshal.FreeHGlobal(ptr);
+            GlassOn = (hr != 0);
+        }
+        catch { GlassOn = false; }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        ApplyGlass();
+        try { DwmSetWindowAttribute(Handle, 20, ref darkMode, sizeof(int)); } catch { }
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        Invalidate();
+    }
+
+    private void CalcTransform()
+    {
+        float w = ClientSize.Width;
+        float h = ClientSize.Height;
+        scale = Math.Min(w / DesignW, h / DesignH);
+        if (scale <= 0) scale = 1f;
+        offX = (w - DesignW * scale) / 2f;
+        offY = (h - DesignH * scale) / 2f;
+    }
+
+    private PointF ToDesign(Point p)
+    {
+        CalcTransform();
+        return new PointF((p.X - offX) / scale, (p.Y - offY) / scale);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
-        g.ScaleTransform(UiScale, UiScale);
+        CalcTransform();
+        g.ScaleTransform(scale, scale);
+        g.TranslateTransform(offX / scale, offY / scale);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-        // 背景：竖向渐变 + 左上角薄荷绿柔光（近似网页的封面模糊氛围）
-        Rectangle full = new Rectangle(0, 0, (int)(Width / UiScale), (int)(Height / UiScale));
+        Rectangle full = new Rectangle(0, 0, (int)DesignW, (int)DesignH);
+        int a1 = GlassOn ? 168 : 255;
+        int a2 = GlassOn ? 200 : 255;
         using (LinearGradientBrush bg = new LinearGradientBrush(full,
-            Color.FromArgb(19, 25, 33), Color.FromArgb(9, 12, 17), 90f))
+            Color.FromArgb(a1, 19, 25, 33), Color.FromArgb(a2, 9, 12, 17), 90f))
         {
             g.FillRectangle(bg, full);
         }
@@ -170,16 +284,14 @@ public class PadCenter : Form
             }
         }
 
-        // 标题
         using (SolidBrush b = new SolidBrush(TextMain))
-            g.DrawString("PadTrack 控制中心", fTitle, b, 22, 22);
+            g.DrawString("PadTrack 控制中心", fTitle, b, 22, 20);
         using (SolidBrush b = new SolidBrush(TextDim))
             g.DrawString("平板触控板 · 统一管理", fSub, b, 24, 56);
 
         DrawCard(g, cardA);
         DrawCard(g, cardB);
 
-        // 状态行
         float y = cardA.Y + 18;
         foreach (string line in Lines)
         {
@@ -201,10 +313,8 @@ public class PadCenter : Form
             y += 28;
         }
 
-        // 按钮
         foreach (PadButton btn in Buttons) DrawButton(g, btn);
 
-        // 日志卡片
         using (SolidBrush t = new SolidBrush(TextDim))
             g.DrawString("最近日志", fTag, t, cardB.X + 4, cardB.Y - 22);
 
@@ -224,6 +334,8 @@ public class PadCenter : Form
                 g.DrawString(LogText ?? "", fLog, b, txt, sf);
         }
         g.Clip = oldClip;
+
+        foreach (PadButton cap in Caps) DrawCap(g, cap);
     }
 
     private void DrawCard(Graphics g, Rectangle r)
@@ -237,10 +349,54 @@ public class PadCenter : Form
         }
     }
 
+    private void DrawCap(Graphics g, PadButton b)
+    {
+        RectangleF r = b.Rect;
+        bool close = b.Key == "close";
+        Color fill = Mix(Color.FromArgb(16, 255, 255, 255),
+                         close ? Color.FromArgb(190, 220, 70, 70) : Color.FromArgb(40, 255, 255, 255),
+                         b.Hover);
+        using (SolidBrush br = new SolidBrush(fill))
+            g.FillEllipse(br, r);
+        using (Pen pen = new Pen(Color.FromArgb((int)(30 + 40 * b.Hover), 255, 255, 255), 1f))
+            g.DrawEllipse(pen, r);
+
+        Color ink = close && b.Hover > 0.5f
+            ? Color.FromArgb(255, 255, 255)
+            : Color.FromArgb((int)(150 + 80 * b.Hover), 235, 242, 248);
+        using (Pen pen = new Pen(ink, 1.6f))
+        {
+            pen.StartCap = LineCap.Round;
+            pen.EndCap = LineCap.Round;
+            float cx = r.X + r.Width / 2f;
+            float cy = r.Y + r.Height / 2f;
+            if (b.Key == "min")
+            {
+                g.DrawLine(pen, cx - 5, cy, cx + 5, cy);
+            }
+            else if (b.Key == "max")
+            {
+                if (WindowState == FormWindowState.Maximized)
+                {
+                    g.DrawRectangle(pen, cx - 5, cy - 5, 8, 8);
+                    g.DrawRectangle(pen, cx - 1, cy - 1, 8, 8);
+                }
+                else
+                {
+                    g.DrawRectangle(pen, cx - 5, cy - 5, 10, 10);
+                }
+            }
+            else
+            {
+                g.DrawLine(pen, cx - 4.5f, cy - 4.5f, cx + 4.5f, cy + 4.5f);
+                g.DrawLine(pen, cx + 4.5f, cy - 4.5f, cx - 4.5f, cy + 4.5f);
+            }
+        }
+    }
+
     private void DrawButton(Graphics g, PadButton b)
     {
         Rectangle r = b.Rect;
-        // 按下时轻微内缩，模仿网页的 scale(.96)
         if (b.Press > 0.01f)
         {
             int dx = (int)(r.Width * 0.015f * b.Press);
@@ -284,17 +440,19 @@ public class PadCenter : Form
         }
     }
 
-    private Point Logical(Point p)
+    private int HitIndex(Point client)
     {
-        return new Point((int)(p.X / UiScale), (int)(p.Y / UiScale));
+        PointF lp = ToDesign(client);
+        for (int i = 0; i < Caps.Count; i++)
+            if (Caps[i].Rect.Contains((int)lp.X, (int)lp.Y)) return 1000 + i;
+        for (int i = 0; i < Buttons.Count; i++)
+            if (Buttons[i].Rect.Contains((int)lp.X, (int)lp.Y)) return i;
+        return -1;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        Point lp = Logical(e.Location);
-        int idx = -1;
-        for (int i = 0; i < Buttons.Count; i++)
-            if (Buttons[i].Rect.Contains(lp)) idx = i;
+        int idx = HitIndex(e.Location);
         if (idx != hot) { hot = idx; Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default; }
         base.OnMouseMove(e);
     }
@@ -307,29 +465,65 @@ public class PadCenter : Form
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        Point lp = Logical(e.Location);
-        for (int i = 0; i < Buttons.Count; i++)
-            if (Buttons[i].Rect.Contains(lp)) down = i;
+        down = HitIndex(e.Location);
         base.OnMouseDown(e);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
-        int hit = -1;
-        Point lp = Logical(e.Location);
-        for (int i = 0; i < Buttons.Count; i++)
-            if (Buttons[i].Rect.Contains(lp)) hit = i;
-
+        int hit = HitIndex(e.Location);
         if (hit >= 0 && hit == down)
         {
-            PadButton b = Buttons[hit];
-            if (b.Enabled && OnAction != null)
+            if (hit >= 1000)
             {
-                try { OnAction(b.Key); } catch { }
+                PadButton cap = Caps[hit - 1000];
+                if (cap.Key == "min") WindowState = FormWindowState.Minimized;
+                else if (cap.Key == "max")
+                    WindowState = WindowState == FormWindowState.Maximized
+                        ? FormWindowState.Normal : FormWindowState.Maximized;
+                else Close();
+                Invalidate();
+            }
+            else
+            {
+                PadButton b = Buttons[hit];
+                if (b.Enabled && OnAction != null) { try { OnAction(b.Key); } catch { } }
             }
         }
         down = -1;
         base.OnMouseUp(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_NCHITTEST = 0x0084;
+        if (m.Msg == WM_NCHITTEST)
+        {
+            int screenX = (short)(m.LParam.ToInt32() & 0xFFFF);
+            int screenY = (short)((m.LParam.ToInt32() >> 16) & 0xFFFF);
+            Point pt = PointToClient(new Point(screenX, screenY));
+            PointF lp = ToDesign(pt);
+            bool onCap = false;
+            foreach (PadButton c in Caps)
+                if (c.Rect.Contains((int)lp.X, (int)lp.Y)) onCap = true;
+
+            if (lp.Y < 70 && !onCap)
+            {
+                m.Result = (IntPtr)2;   // HTCAPTION：可拖动
+                return;
+            }
+        }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnDoubleClick(EventArgs e)
+    {
+        Point pt = PointToClient(Cursor.Position);
+        PointF lp = ToDesign(pt);
+        if (lp.Y < 70)
+            WindowState = WindowState == FormWindowState.Maximized
+                ? FormWindowState.Normal : FormWindowState.Maximized;
+        base.OnDoubleClick(e);
     }
 }
 
@@ -485,7 +679,7 @@ function Refresh-Ui {
         $lines.Add("运行状态|未运行|warn")
     }
     if ($srv) {
-        if (Test-NewVersion) { $lines.Add('版本|新版|codE') } else { $lines.Add('版本|旧版，建议停止后重开|warn') }
+        if (Test-NewVersion) { $lines.Add('版本|新版|ok') } else { $lines.Add('版本|旧版，建议停止后重开|warn') }
     } else {
         $lines.Add('版本|-|dim')
     }
@@ -519,12 +713,41 @@ function Refresh-Ui {
     $ui.Invalidate()
 }
 
+if ($DataTest) {
+    try {
+        Refresh-Ui
+        "Lines 数量: " + $ui.Lines.Count
+        foreach ($l in $ui.Lines) { "  " + $l }
+        "LogText 长度: " + $ui.LogText.Length
+        $b = $ui.Buttons[0]
+        "按钮0: " + $b.Text + " Enabled=" + $b.Enabled
+        $ui.CreateControl()
+        $bmp = New-Object System.Drawing.Bitmap 700, 800
+        $g2 = [System.Drawing.Graphics]::FromImage($bmp)
+        $g2.Clear([System.Drawing.Color]::FromArgb(30, 60, 30))
+        $g2.Dispose()
+        $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 700, 800))
+        $bmp.Save((Join-Path $env:TEMP 'center_draw.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+        $bmp.Dispose()
+        "已存图: " + (Join-Path $env:TEMP 'center_draw.png')
+    } catch {
+        "刷新出错: " + $_.Exception.ToString()
+    }
+    exit 0
+}
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000
-$timer.Add_Tick({ try { Refresh-Ui } catch {} })
+$timer.Add_Tick({ try { Refresh-Ui } catch { Add-Content -Path (Join-Path $here 'center_error.log') -Value ('ERR ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber) } })
 $timer.Start()
 
-$ui.Add_Shown({ try { Refresh-Ui } catch {} })
+$ui.Add_Shown({ try { Refresh-Ui } catch { Add-Content -Path (Join-Path $here 'center_error.log') -Value ('SHOWN ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber) } })
+
+# 首帧之前先同步刷一次：不依赖 Shown 事件的时序
+try { Refresh-Ui } catch {
+    Add-Content -Path (Join-Path $here 'center_error.log') -Value ('PRE ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber)
+}
+
 [void]$ui.ShowDialog()
 $timer.Stop()
 
