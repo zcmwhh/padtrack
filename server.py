@@ -53,6 +53,16 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 imm32 = ctypes.WinDLL("imm32", use_last_error=True)
+# 句柄必须按指针宽度声明，否则 64 位下会被截断成 32 位
+imm32.ImmGetContext.argtypes = [wintypes.HWND]
+imm32.ImmGetContext.restype = wintypes.HANDLE
+imm32.ImmGetConversionStatus.argtypes = [
+    wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD)]
+imm32.ImmGetConversionStatus.restype = wintypes.BOOL
+imm32.ImmReleaseContext.argtypes = [wintypes.HWND, wintypes.HANDLE]
+imm32.ImmReleaseContext.restype = wintypes.BOOL
+imm32.ImmGetDefaultIMEWnd.argtypes = [wintypes.HWND]
+imm32.ImmGetDefaultIMEWnd.restype = wintypes.HWND
 
 ULONG_PTR = ctypes.c_size_t
 
@@ -1859,26 +1869,45 @@ def launch_center():
 def ime_state():
     """前台窗口当前是不是中文输入状态。
 
-    走 IMM：ImmGetContext(前台窗口) → ImmGetConversionStatus，
-    IME_CMODE_NATIVE(0x1) 置位表示中文（本地语言）模式。
-    拿不到上下文（没有输入法 / 焦点不在可输入窗口）就当作英文。
+    三级兜底：
+    1. ImmGetContext + ImmGetConversionStatus（IME_CMODE_NATIVE 位）
+    2. ImmGetDefaultIMEWnd + WM_IME_CONTROL / IMC_GETCONVERSIONMODE
+    3. 都没有 IME → 按键盘布局语言猜（中文布局算中文）
     """
-    try:
-        hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return {"ime": False, "chinese": False}
-        himc = imm32.ImmGetContext(wintypes.HWND(hwnd))
-        if not himc:
-            return {"ime": False, "chinese": False}
-        conv = wintypes.DWORD(0)
-        sent = wintypes.DWORD(0)
-        ok = imm32.ImmGetConversionStatus(himc, ctypes.byref(conv), ctypes.byref(sent))
-        imm32.ImmReleaseContext(wintypes.HWND(hwnd), himc)
-        if not ok:
-            return {"ime": False, "chinese": False}
-        return {"ime": True, "chinese": bool(conv.value & 0x1)}
-    except Exception:
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
         return {"ime": False, "chinese": False}
+
+    try:
+        himc = imm32.ImmGetContext(hwnd)
+        if himc:
+            conv = wintypes.DWORD(0)
+            sent = wintypes.DWORD(0)
+            ok = imm32.ImmGetConversionStatus(himc, ctypes.byref(conv), ctypes.byref(sent))
+            imm32.ImmReleaseContext(hwnd, himc)
+            if ok:
+                return {"ime": True, "chinese": bool(conv.value & 0x1)}
+    except Exception:
+        pass
+
+    try:
+        iwnd = imm32.ImmGetDefaultIMEWnd(hwnd)
+        if iwnd:
+            mode = user32.SendMessageW(iwnd, 0x0283, 0x0001, 0)
+            return {"ime": True, "chinese": bool(int(mode or 0) & 0x1)}
+    except Exception:
+        pass
+
+    try:
+        tid = user32.GetWindowThreadProcessId(hwnd, None)
+        hkl = user32.GetKeyboardLayout(tid)
+        langid = int(hkl) & 0xFFFF
+        if (langid & 0xFF) == 0x04:      # 0x04 = 中文
+            return {"ime": True, "chinese": True}
+    except Exception:
+        pass
+
+    return {"ime": False, "chinese": False}
 
 
 def main():
