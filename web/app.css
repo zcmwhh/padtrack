@@ -44,6 +44,20 @@ html.glass-light {
     -webkit-touch-callout: none;
     overscroll-behavior: none;
   }
+  /* 装饰性图片不参与指针事件：安卓长按 <img> 会弹「保存图片」 */
+  img {
+    -webkit-user-drag: none;
+    user-drag: none;
+    pointer-events: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  html, body {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   /* 触控区一律不可选中，避免安卓长按弹出「复制/全选」菜单 */
   #pad, #pad * {
     -webkit-user-select: none !important;

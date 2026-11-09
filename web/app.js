@@ -2371,7 +2371,13 @@
   // 注意：不要再遍历 [data-vk] 绑 click —— 键盘按键是动态生成的，
   // 那样会和 buildKeys 里的处理叠加，导致一次点击发出两次按键。
 
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 长按不应弹任何浏览器菜单（安卓 Chrome 对 <img> 会弹「保存图片」）
+  // 用捕获阶段，确保在元素自己的处理之前就拦下来
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, { capture: true });
+  document.addEventListener('dragstart', (e) => e.preventDefault(), { capture: true });
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('selectstart', (e) => {
     // 输入框里要能正常选中文字，其它地方一律不允许
