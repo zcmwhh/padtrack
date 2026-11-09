@@ -774,6 +774,16 @@
   }, 220);
 
   // ?debug=1 时显示同步诊断：paused 时 t 应该停住
+  // 帧间隔统计：能区分「渲染卡」和「网络卡」
+  let frameGapMax = 0, frameLast = performance.now(), frameGapBad = 0;
+  (function watchFrames() {
+    const now = performance.now();
+    const gap = now - frameLast;
+    frameLast = now;
+    if (gap > 60) { frameGapBad++; frameGapMax = Math.max(frameGapMax, Math.round(gap)); }
+    requestAnimationFrame(watchFrames);
+  })();
+
   const syncbox = document.getElementById('syncbox');
   const DEBUG_SYNC = new URLSearchParams(location.search).get('debug') === '1';
   if (DEBUG_SYNC) syncbox.style.display = 'block';
@@ -787,6 +797,7 @@
       '\noffset=' + lyricOffset + '  dur=' + (songDur ? songDur.toFixed(1) : '-') +
       '\nstatus=' + (lyricPlaying ? 'playing' : 'paused') +
       '  lines=' + lyricLines.length +
+      '\n卡帧=' + frameGapBad + ' 次  最长=' + frameGapMax + 'ms' +
       '\n' + (lyricSongKey || '-');
   }, 250);
 
@@ -1134,13 +1145,15 @@
       if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
         mode = 'move';
         clearTimeout(lpTimer);
-        lastCX = sx; lastCY = sy;
+        // 用当前点做基准：阈值内那几像素直接丢掉，
+        // 否则第一帧会把整段距离一次性发出去，表现为"起步瞬移"
+        lastCX = e.clientX; lastCY = e.clientY;
       }
       if (mode === 'dblwait' && Math.hypot(e.clientX - dblX, e.clientY - dblY) > DBL_WOBBLE) {
         // 第二下还没停稳就滑走了：不是双击拖，按普通移动处理（光标继续跟手）
         clearTimeout(dblTimer);
         mode = 'move';
-        lastCX = dblX; lastCY = dblY;
+        lastCX = e.clientX; lastCY = e.clientY;
       }
       if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > DBL_MOVE) {
         mode = 'drag';
@@ -1310,7 +1323,9 @@
       accX = 0; accY = 0;
       let f = S.sens;
       if (S.accel) {
-        const sp = Math.hypot(dx, dy);
+        // 单帧位移封顶：WiFi 抖动或掉帧时 delta 会异常大，
+        // 不封顶的话加速度会把它再放大一次，看起来就是"突然冲出去"
+        const sp = Math.min(Math.hypot(dx, dy), 40);
         f *= 0.62 + Math.min(sp / 26, 1) * 0.9;
       }
       remX += dx * f; remY += dy * f;
@@ -1708,7 +1723,7 @@
         if (kfMoved > 12) {          // 划开了 → 当触控板用，不触发按键
           kfMode = 'move';
           kfTapEl = null;
-          kfLastX = kfSX; kfLastY = kfSY;
+          kfLastX = e.clientX; kfLastY = e.clientY;
         }
       }
       if (kfMode === 'move') {
@@ -1829,7 +1844,7 @@
       if (p.size === 1) {
         if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
           mode = 'move';
-          lx = sx; ly = sy;
+          lx = e.clientX; ly = e.clientY;
         }
         if (mode === 'move') {
           accX += e.clientX - lx;
