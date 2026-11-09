@@ -1,0 +1,982 @@
+* { box-sizing: border-box; }
+  html {
+    background: #0d1117;          /* 窗口留白处也刷成主题色，不露黑边 */
+    overflow: hidden;
+  }
+  /* 全屏时浏览器给元素留的边也上色，避免出现黑条 */
+  :fullscreen { background: #0d1117 !important; }
+  body:fullscreen { width: 100vw; height: 100vh; background: #0d1117 !important; }
+  :root {
+  /* 毛玻璃基调：默认黑色玻璃 */
+  --glass-top: rgba(16, 20, 26, .62);
+  --glass-bot: rgba(10, 13, 18, .5);
+  --glass-solid: rgba(14, 18, 24, .55);
+  --glass-border: rgba(255, 255, 255, .1);
+  --glass-inner: rgba(255, 255, 255, .06);
+  --glass-hover: rgba(255, 255, 255, .14);
+  --glass-key-top: rgba(16, 20, 26, .58);
+  --glass-key-bot: rgba(10, 13, 18, .44);
+  --glass-text: #e2ecf6;
+}
+html.glass-light {
+  /* 白色玻璃（原来的样子） */
+  --glass-top: rgba(255, 255, 255, .11);
+  --glass-bot: rgba(255, 255, 255, .06);
+  --glass-solid: rgba(255, 255, 255, .08);
+  --glass-border: rgba(255, 255, 255, .14);
+  --glass-inner: rgba(255, 255, 255, .12);
+  --glass-hover: rgba(255, 255, 255, .2);
+  --glass-key-top: rgba(255, 255, 255, .1);
+  --glass-key-bot: rgba(255, 255, 255, .045);
+  --glass-text: #e2ecf6;
+}
+
+:fullscreen::backdrop { background: #0d1117 !important; }
+  ::backdrop { background: #0d1117 !important; }
+
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; width: 100%;
+    background: #0d1117; color: #e6edf3;
+    overscroll-behavior: none;
+    font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+  }
+  /* 触控区一律不可选中，避免安卓长按弹出「复制/全选」菜单 */
+  #pad, #pad * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-drag: none !important;
+  }
+  #pad ::selection { background: transparent; }
+  #pad {
+    position: fixed; inset: 0;
+    touch-action: none;
+    background:
+      radial-gradient(1400px 900px at 25% 15%,
+        rgba(23, 34, 46, .82) 0%, rgba(13, 17, 23, .72) 62%),
+      radial-gradient(900px 600px at 85% 90%,
+        rgba(19, 26, 36, .70) 0%, transparent 70%);
+  }
+  #hint {
+    z-index: 10;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    text-align: center; line-height: 2.1; font-size: 15px; color: #5d6b7a;
+    pointer-events: none; transition: opacity .6s ease; padding: 0 24px;
+  }
+  #hint b { color: #8fa3b8; font-weight: 600; }
+  #hud {
+    z-index: 30;
+    position: fixed; left: 16px; top: calc(16px + env(safe-area-inset-top));
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px;
+    background: rgba(22, 30, 40, .72); border: 1px solid rgba(120, 150, 180, .18);
+    font-size: 13px; color: #9fb0c2; backdrop-filter: blur(8px);
+    pointer-events: none;
+  }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: #d9534f; transition: background .3s; }
+  #dot.on { background: #3ecf8e; box-shadow: 0 0 8px rgba(62, 207, 142, .8); }
+  /* 歌词偏移不为 0 时才出现：偏移是全局的，忘了就会以为歌词一直错位 */
+  .offbadge {
+    display: none;
+    padding: 1px 8px; border-radius: 999px;
+    background: rgba(255, 176, 68, .16); color: #ffb044;
+    border: 1px solid rgba(255, 176, 68, .38);
+    font-size: 12px; font-weight: 600; letter-spacing: .2px;
+  }
+  .offbadge.on { display: inline-block; }
+  .offval { color: #9fb0c2; font-weight: 600; margin-right: 2px; }
+  .offval.on { color: #ffb044; }
+
+  #tip {
+    z-index: 90;
+    position: fixed; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(8px);
+    padding: 8px 16px; border-radius: 999px;
+    background: rgba(62, 207, 142, .14); border: 1px solid rgba(62, 207, 142, .34);
+    color: #8fe3bd; font-size: 13px; white-space: nowrap;
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  #tip.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------------- 动效基调：统一缓动与时长 ---------------- */
+  :root {
+    --ease-spring: cubic-bezier(.34, 1.28, .52, 1);   /* 轻微回弹 */
+    --ease-out: cubic-bezier(.22, 1, .36, 1);         /* 顺滑收尾 */
+    --ease-inout: cubic-bezier(.65, 0, .35, 1);
+    --t-fast: .22s;
+    --t-mid: .42s;
+    --t-slow: .62s;
+  }
+
+  /* ---------------- 顶部媒体胶囊（灵动岛式） ---------------- */
+  #island {
+    position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%;
+    z-index: 70;
+    width: 182px; height: 46px; border-radius: 24px;
+    background: rgba(13, 18, 24, .88);
+    border: 1px solid rgba(120, 150, 180, .16);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .05);
+    backdrop-filter: blur(16px) saturate(1.25);
+    overflow: hidden;
+    opacity: 0; pointer-events: none;
+    transform: translateX(-50%) translateY(-18px) scale(.9);
+    transition:
+      opacity var(--t-mid) var(--ease-out),
+      transform var(--t-slow) var(--ease-spring),
+      width var(--t-mid) var(--ease-spring),
+      height var(--t-mid) var(--ease-spring),
+      border-radius var(--t-mid) var(--ease-spring),
+      background var(--t-mid) ease;
+  }
+  #island.on {
+    opacity: 1; pointer-events: auto;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  #island.exp {
+    width: min(94vw, 392px); height: 96px; border-radius: 30px;
+    background: rgba(255, 255, 255, .07);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    border-color: rgba(255, 255, 255, .14);
+  }
+
+  .isle-compact, .isle-full {
+    position: absolute; inset: 0;
+    display: flex; align-items: center;
+    transition: opacity var(--t-mid) var(--ease-out),
+                transform var(--t-slow) var(--ease-spring);
+  }
+  .isle-compact { padding: 0 8px 0 8px; gap: 10px; }
+  .isle-full { padding: 0 14px; gap: 12px; }
+
+  /* 收起态与展开态交叉淡入淡出，各自带轻微位移，避免生硬切换 */
+  #island:not(.exp) .isle-full { opacity: 0; transform: scale(.94) translateY(6px); pointer-events: none; }
+  #island.exp .isle-compact { opacity: 0; transform: scale(.94) translateY(-6px); pointer-events: none; }
+  #island.exp .isle-full { opacity: 1; transform: none; }
+
+  .isle-cover {
+    width: 30px; height: 30px; border-radius: 9px; object-fit: cover;
+    background: #1c2632; flex: none;
+    transition: transform var(--t-slow) var(--ease-spring), border-radius var(--t-mid) var(--ease-spring);
+  }
+  #island.exp .isle-cover { transform: scale(.0); }
+  .isle-cover.big {
+    width: 62px; height: 62px; border-radius: 16px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+    transform: scale(.82);
+    transition: transform var(--t-slow) var(--ease-spring);
+  }
+  #island.exp .isle-cover.big { transform: scale(1); }
+
+  /* 播放中的小律动条 */
+  .isle-wave { display: flex; align-items: flex-end; gap: 3px; height: 16px; }
+  .isle-wave i {
+    width: 3px; border-radius: 2px; background: #6ee7b7; opacity: .9;
+    height: 6px;
+    transition: height var(--t-mid) var(--ease-inout);
+  }
+  .isle-wave.playing i { animation: isleBeat 1.05s var(--ease-inout) infinite; }
+  .isle-wave.playing i:nth-child(2) { animation-delay: .18s; }
+  .isle-wave.playing i:nth-child(3) { animation-delay: .36s; }
+  @keyframes isleBeat {
+    0%, 100% { height: 5px; opacity: .55; }
+    50% { height: 15px; opacity: 1; }
+  }
+
+  .isle-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  #musicTitle, #musicArtist {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #musicTitle { font-size: 13px; color: #e6edf3; font-weight: 600; letter-spacing: .2px; }
+  #musicArtist { font-size: 11px; color: #7d8fa1; }
+
+  .isle-bar {
+    position: relative; height: 3px; border-radius: 2px;
+    background: rgba(120, 150, 180, .18); overflow: hidden; margin-top: 2px;
+  }
+  .isle-bar i {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #5eb8ff, #6ee7b7);
+    transition: width .55s linear;
+  }
+
+  .isle-ctrl { display: flex; align-items: center; gap: 2px; flex: none; }
+  #island button {
+    border: none; background: transparent; color: #c7d5e3;
+    display: grid; place-items: center; cursor: pointer;
+    transition: transform var(--t-fast) var(--ease-spring),
+                background var(--t-fast) ease, color var(--t-fast) ease;
+  }
+  #island button:active { transform: scale(.86); color: #6ee7b7; }
+  .isle-play { width: 34px; height: 34px; border-radius: 50%; font-size: 14px; }
+  .isle-play:hover { background: rgba(120, 150, 180, .12); }
+  .isle-ctrl button { width: 36px; height: 36px; border-radius: 50%; font-size: 15px; }
+
+  /* 小屏时展开态收紧一点，避免贴边 */
+  @media (max-width: 640px) {
+    #island.exp { width: 94vw; height: 128px; padding-right: 6px; }
+    .isle-cover.big { width: 52px; height: 52px; }
+  }
+
+
+  /* 退格 / 回车 / 空格用图标：尺寸固定，颜色跟随按钮 */
+  .kbkey.icon { display: flex; align-items: center; justify-content: center; }
+  .kbkey.icon svg {
+    width: 21px; height: 21px;
+    fill: none; stroke: currentColor; stroke-width: 1.85;
+    stroke-linecap: round; stroke-linejoin: round;
+    pointer-events: none;
+  }
+  #kfPad .kbkey.icon svg, #trTop .kbkey.icon svg { width: 24px; height: 24px; }
+
+  /* 按键按压反馈：轻微内缩 + 高亮，接近实体键盘手感 */
+  .kbkey {
+    transition: transform .16s var(--ease-spring), background .16s ease,
+                border-color .16s ease, color .16s ease;
+  }
+  .kbkey:active { transform: scale(.955); }
+
+  /* 设置面板过渡 */
+  #panel {
+    transition: opacity .38s var(--ease-out),
+                transform .52s var(--ease-spring);
+  }
+
+  /* 顶部形态切换按钮 */
+  .modebar .mini {
+    transition: transform .2s var(--ease-spring), background .2s ease,
+                border-color .2s ease, color .2s ease;
+  }
+  .modebar .mini:active { transform: scale(.9); }
+
+  /* 顶部圆形按钮 */
+  .round {
+    transition: transform .2s var(--ease-spring), background .2s ease,
+                border-color .2s ease, color .2s ease;
+  }
+
+
+  /* ---------------- 统一的浮层视觉 ---------------- */
+  #hud, .topbar .round, #numpad, #panel, #tip, #island {
+    /* iOS 毛玻璃：白膜 + 发丝边 */
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .04);
+  }
+  #numpad { background: var(--glass-solid); }
+  #numpad.active {
+    opacity: 1; pointer-events: auto;
+    background: rgba(255, 255, 255, .09);
+    border-color: rgba(255, 255, 255, .18);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+  }
+  #numpad button {
+    background: var(--glass-solid);
+    border: 1px solid var(--glass-border);
+    color: #b3c2d1;
+    transition: transform .16s var(--ease-spring), background .16s ease;
+  }
+  #numpad button:active { transform: scale(.94); background: rgba(255, 255, 255, .2); }
+
+  /* SVG 图标统一尺寸 */
+  #island svg { width: 19px; height: 19px; display: block; }
+  .isle-play svg { width: 15px; height: 15px; }
+  .round svg { width: 20px; height: 20px; display: block; }
+  .round { padding: 0; display: grid; place-items: center; }
+
+  /* 紧凑态：封面 + 歌名 + 律动 + 播放键 */
+  #island { width: 244px; }
+  .isle-meta.compact { flex-direction: row; align-items: center; gap: 0; }
+  .isle-meta.compact #musicTitle {
+    font-size: 12.5px; font-weight: 500; color: #cfdcea; letter-spacing: .1px;
+  }
+  .isle-meta.compact { padding-right: 2px; }
+  #musicTitleFull {
+    font-size: 13px; color: #e6edf3; font-weight: 600; letter-spacing: .2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* 收起态的律动条稍微往里挪，和整体留白一致 */
+  .isle-wave { margin-right: 2px; }
+
+
+
+  /* ---------------- 展开态：两行迷你播放器 ---------------- */
+  #island.exp {
+    width: min(94vw, 430px); height: 186px; border-radius: 30px;
+  }
+
+  /* 展开态的音量条 */
+  .isle-vol {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 0 4px; margin-top: 2px;
+  }
+  .isle-vol.hide { display: none; }
+  .volmute {
+    width: 32px; height: 32px; flex: none; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: none; color: #c7d5e3;
+    transition: color .18s ease, transform .18s var(--ease-spring);
+  }
+  .volmute svg { width: 19px; height: 19px; }
+  .volmute:active { transform: scale(.86); }
+  .volmute.muted { color: #ff9f6e; }
+  /* 滑条本体：细轨 + 填充 + 圆点，触摸目标做高一点好按住 */
+  .volbar {
+    position: relative; flex: 1; height: 30px;
+    display: flex; align-items: center;
+    touch-action: none; cursor: pointer;
+  }
+  .volbar::before {
+    content: ''; position: absolute; left: 0; right: 0; height: 5px;
+    border-radius: 3px; background: rgba(120, 150, 180, .22);
+  }
+  #volFill {
+    position: absolute; left: 0; height: 5px; border-radius: 3px;
+    background: linear-gradient(90deg, #3ecf8e, #7fe0b4);
+    transition: width .12s linear;
+  }
+  #volKnob {
+    position: absolute; width: 15px; height: 15px; border-radius: 50%;
+    background: #eaf6ff; transform: translateX(-50%);
+    box-shadow: 0 0 10px rgba(130, 200, 255, .55);
+    transition: left .12s linear;
+  }
+  .volbar.dragging #volKnob { box-shadow: 0 0 16px rgba(130, 220, 255, .85); }
+  .volpct {
+    flex: none; min-width: 40px; text-align: right;
+    font-size: 12px; color: #9fb0c2; font-variant-numeric: tabular-nums;
+  }
+  .isle-full {
+    flex-direction: column; justify-content: center; align-items: stretch;
+    gap: 12px; padding: 14px 16px;
+  }
+  .isle-top { display: flex; align-items: center; gap: 12px; width: 100%; }
+  .isle-top .isle-meta { flex: 1; min-width: 0; }
+  .isle-cover.big { width: 58px; height: 58px; border-radius: 14px; }
+
+  .isle-bottom {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 0 4px;
+  }
+  .islectl {
+    width: 34px; height: 34px; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: none; color: #c7d5e3;
+    transition: transform .18s var(--ease-spring), color .18s ease, background .18s ease;
+  }
+  .islectl svg { width: 19px; height: 19px; }
+  .islectl:active { transform: scale(.86); color: #6ee7b7; }
+  .isle-play-big {
+    width: 44px; height: 44px; border-radius: 50%; padding: 0;
+    display: grid; place-items: center;
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(255, 255, 255, .06);
+    color: #f2f8ff;
+    transition: transform .18s var(--ease-spring), background .18s ease;
+  }
+  .isle-play-big svg { width: 20px; height: 20px; }
+  .isle-play-big:active { transform: scale(.88); background: rgba(255, 255, 255, .16); }
+  .islemode { width: 30px; height: 30px; }
+  .islemode svg { width: 17px; height: 17px; }
+
+
+  /* ---------------- 封面背景（高度模糊） ---------------- */
+  #bgCover {
+    position: fixed; inset: 0; z-index: 1;
+    pointer-events: none; overflow: hidden;
+    /* 把重绘限制在这一层里，别让上层文字刷新时带着模糊图一起重画 */
+    contain: paint;
+    opacity: 0; transition: opacity 1.1s var(--ease-out);
+  }
+  #bgCover.on { opacity: 1; }
+  .bgimg {
+    position: absolute; inset: -12%;
+    width: 124%; height: 124%;
+    object-fit: cover;
+    filter: blur(90px) saturate(1.7) brightness(.9);
+    transform: scale(1.1) translateZ(0);   /* 独立合成层：模糊结果缓存在 GPU 上 */
+    backface-visibility: hidden;
+    /* 只剩大块颜色，看不到任何细节 */
+    opacity: 0;
+    /* 切歌时交叉淡入淡出：新图慢一点进来，比原来硬换柔和 */
+    transition: opacity 1.4s var(--ease-out);
+    will-change: opacity;
+  }
+  .bgimg.on { opacity: 1; }
+  /* 压暗，保证上面的文字和控件清晰 */
+  .bgscrim {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 30%, rgba(10, 14, 20, .30) 0%, rgba(10, 14, 20, .72) 70%),
+      linear-gradient(180deg, rgba(9, 12, 17, .55) 0%, rgba(9, 12, 17, .78) 100%);
+  }
+
+  /* ---------------- 可拖动的进度条 ---------------- */
+  .isle-barrow {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 1px;
+  }
+  .isle-bar {
+    position: relative; flex: 1; height: 14px;
+    display: flex; align-items: center; cursor: pointer;
+    touch-action: none;
+  }
+  .isle-bar::before {
+    content: ''; position: absolute; left: 0; right: 0; height: 3px;
+    border-radius: 3px; background: rgba(140, 160, 180, .16);
+  }
+  .isle-bar i {
+    position: relative; height: 3px; width: 0%; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(110, 190, 255, .9), rgba(110, 231, 183, .95));
+    box-shadow: 0 0 8px rgba(110, 231, 183, .35);
+    transition: width .6s linear;
+    pointer-events: none;
+  }
+  .isle-bar.dragging i { transition: none; }
+  .isle-bar::after {
+    content: ''; position: absolute; width: 9px; height: 9px; border-radius: 50%;
+    background: #eaf2f8;
+    left: calc(var(--p, 0) * 1% - 4.5px);
+    opacity: 0; transform: scale(.5);
+    transition: opacity .2s ease, transform .2s var(--ease-spring);
+    pointer-events: none;
+  }
+  .isle-bar.dragging::after { opacity: 1; transform: scale(1); }
+  #musicTime {
+    flex: none; font-size: 10.5px; color: #7d8fa1; letter-spacing: .2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+
+  .islemode {
+    flex: none; width: 22px; height: 22px; border-radius: 6px;
+    display: grid; place-items: center; padding: 0;
+    background: transparent; border: none; color: #5f7183;
+    transition: color .2s ease, background .2s ease, transform .18s var(--ease-spring);
+  }
+  .islemode svg { width: 15px; height: 15px; }
+  .islemode.on { color: #6ee7b7; }
+  .islemode:active { transform: scale(.86); }
+  .islemode.unsupported { opacity: .32; }
+
+
+  /* ---------------- 歌单抽屉 ---------------- */
+  #sheetMask {
+    position: fixed; inset: 0; z-index: 80; background: rgba(5, 8, 12, .5);
+    opacity: 0; pointer-events: none;
+    transition: opacity .35s var(--ease-out);
+    backdrop-filter: blur(2px);
+  }
+  #sheetMask.on { opacity: 1; pointer-events: auto; }
+
+  #plSheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 81;
+    height: min(74vh, 620px);
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border-top: 1px solid var(--glass-border);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -20px 50px rgba(0, 0, 0, .5);
+    padding: 10px 22px calc(14px + env(safe-area-inset-bottom));
+    transform: translateY(102%);
+    transition: transform .52s var(--ease-spring);
+  }
+  #plSheet.on { transform: translateY(0); }
+
+  .sheet-head {
+    position: relative;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0 10px;
+    font-size: 13px; color: #9fb0c2;
+  }
+  .sheet-head::before {
+    content: ''; position: absolute; left: 50%; top: 0;
+    transform: translateX(-50%);
+    width: 38px; height: 4px; border-radius: 2px;
+    background: rgba(120, 150, 180, .28);
+  }
+  .sheet-head span { font-weight: 600; color: #dbe7f3; font-size: 14px; padding-left: 4px; }
+  .sheet-head button { margin-left: auto; }
+
+  #plChips {
+    display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px;
+    scrollbar-width: none;
+    scroll-padding: 0 10px;
+  }
+  /* 滚动了才在对应那一侧淡出，否则停在最左边时第一枚胶囊会被淡掉一块 */
+  #plChips.fade-l {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 100%);
+  }
+  #plChips.fade-r {
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 18px), transparent 100%);
+            mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 18px), transparent 100%);
+  }
+  #plChips.fade-l.fade-r {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18px,
+                        #000 calc(100% - 18px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 18px,
+                        #000 calc(100% - 18px), transparent 100%);
+  }
+  #plChips::-webkit-scrollbar { display: none; }
+  #plChips button {
+    flex: none; padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
+    background: rgba(30, 41, 54, .8); border: 1px solid rgba(120, 150, 180, .14);
+    color: #a9bacb; transition: all .22s var(--ease-spring);
+  }
+  #plChips button.on {
+    background: rgba(62, 207, 142, .16); border-color: rgba(62, 207, 142, .5);
+    color: #8fe3bd; transform: scale(1.02);
+  }
+
+  #plList { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .trk {
+    display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+    border-bottom: 1px solid rgba(120, 150, 180, .07);
+    animation: trkIn .42s var(--ease-out) both;
+  }
+  @keyframes trkIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .trk .idx { width: 26px; text-align: right; font-size: 12px; color: #5d6b7a; flex: none; }
+  .trk .meta2 { flex: 1; min-width: 0; }
+  .trk .nm { font-size: 13.5px; color: #dfe9f3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trk .ar { font-size: 11.5px; color: #6f8194; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trk .du { font-size: 11.5px; color: #5d6b7a; flex: none; }
+  .trk.now .nm { color: #6ee7b7; font-weight: 600; }
+  .trk.now .idx { color: #6ee7b7; }
+
+  #plEmpty { text-align: center; color: #5d6b7a; font-size: 13px; padding: 40px 0; }
+
+  /* 尊重系统的「减少动态效果」 */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+
+  /* 触摸板模式的九宫格数字键盘：常驻显示，未激活时只是背景（不拦触摸） */
+  #numpad {
+    position: fixed; right: 16px; top: 70px; bottom: 70px;
+    width: min(32vw, 330px); z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: 1fr;
+    gap: 6px; padding: 10px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(255, 255, 255, .10);
+    opacity: .20; pointer-events: none;
+    transition: opacity .2s ease, background .2s ease, border-color .2s ease;
+  }
+  #numpad.active {
+    opacity: 1; pointer-events: auto;
+    background: rgba(12, 18, 24, .86);
+    border-color: rgba(120, 150, 180, .22);
+    backdrop-filter: blur(6px);
+    transform: none;
+  }
+  #numpad { transform: scale(.97); transform-origin: right center;
+    transition: opacity .45s var(--ease-out), transform .55s var(--ease-spring),
+                background .4s ease, border-color .4s ease; }
+  #numpad button {
+    border-radius: 9px; border: 1px solid var(--glass-border);
+    background: var(--glass-solid); color: var(--glass-text); font-size: 15px;
+    box-shadow: inset 0 1px 0 var(--glass-inner);
+  }
+  #numpad button:active { background: rgba(255, 255, 255, .2); }
+  #numpad button.fn { font-size: 12px; color: #8fa3b8; }
+
+  /* 左侧滚动歌词：纯展示，pointer-events:none，不影响触控板 */
+  #lyrics {
+    position: fixed; left: 26px; top: 92px; bottom: 92px;
+    width: min(40vw, 480px); z-index: 15;
+    pointer-events: none; overflow: hidden;
+    opacity: 0; transform: translateY(12px) scale(.98);
+    transition: opacity .5s cubic-bezier(.32, .72, 0, 1),
+                transform .5s cubic-bezier(.32, .72, 0, 1);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  }
+  #lyrics.on { opacity: 1; transform: none; }
+  /* 作词/作曲：固定在歌词框上方的空隙里，单行、不参与滚动和高亮 */
+  #lyricCredits {
+    position: fixed; left: 26px; top: 60px;
+    width: min(40vw, 480px);
+    z-index: 16; pointer-events: none;
+    text-align: center; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+    font-size: 12.5px; line-height: 1.6; color: #8fa2b4;
+    opacity: 0; transition: opacity .5s ease;
+  }
+  #lyricCredits.on { opacity: .78; }
+  #lyricInner {
+    position: relative;      /* 让子元素 offsetTop 相对它计算 */
+    width: 100%; text-align: center;
+    transition: transform .8s var(--ease-out);
+    will-change: transform;
+  }
+  .lyric-line {
+    font-size: 16px; line-height: 2.05; color: #7f92a5;
+    opacity: .55; transform: scale(.96);
+    filter: blur(1.2px);
+    transition: color .55s ease, opacity .55s ease, filter .55s ease,
+                transform .65s var(--ease-spring);
+  }
+  .lyric-line.active {
+    color: #f2f8ff; opacity: 1; font-weight: 600; transform: scale(1.02);
+    filter: blur(0);
+    text-shadow: 0 0 22px rgba(150, 200, 255, .5);
+  }
+  /* 有歌词时让中间的提示文字让位 */
+  body.has-lyrics #hint { opacity: 0 !important; }
+  #hint { transition: opacity .35s ease; }
+
+  .topbar {
+    z-index: 30;
+    position: fixed; right: 16px; top: calc(10px + env(safe-area-inset-top));
+    display: flex; gap: 10px;
+  }
+  .round {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 19px; display: grid; place-items: center;
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%); cursor: pointer;
+  }
+  .round:active { background: var(--glass-hover); transform: scale(.9); }
+  .round { transition: transform .16s cubic-bezier(.32, .72, 0, 1), background .16s; }
+  .round.on {
+    border-color: rgba(62, 207, 142, .65);
+    color: #3ecf8e;
+    box-shadow: 0 0 12px rgba(62, 207, 142, .35);
+  }
+
+  /* 设置面板 */
+  #panel {
+    z-index: 75;                     /* 必须高于背景层与键盘层 */
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -45%) scale(.94);
+    width: min(420px, calc(100vw - 40px));
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    border-radius: 18px; padding: 20px 22px;
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  }
+  #panel.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  #panel h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; color: #dbe7f3; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 14px 0; font-size: 14px; color: #a9bacb; }
+  .row input[type=range] { width: 55%; accent-color: #3ecf8e; }
+  .row input[type=checkbox] { width: 20px; height: 20px; accent-color: #3ecf8e; }
+  .val { color: #3ecf8e; font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+  .tip { font-size: 12px; line-height: 1.7; color: #66788a; margin-top: 14px; border-top: 1px solid rgba(120,150,180,.14); padding-top: 12px; }
+
+  /* 键盘抽屉 */
+  #kb {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 40;                               /* 盖住歌词层和数字键层 */
+    transform: translateY(110%);
+    transition: transform .56s var(--ease-spring), opacity .36s var(--ease-out);
+    opacity: 0; pointer-events: none;
+    background: #0d1319;                       /* 不透明，打字时背景不干扰视线 */
+    border-top: 1px solid rgba(120, 150, 180, .2);
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    box-shadow: 0 -18px 40px rgba(0, 0, 0, .45);
+  }
+  #kb.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
+  #ta {
+    width: 100%; min-height: 54px; max-height: 160px; resize: none;
+    background: #0b1016; color: #e6edf3;
+    border: 1px solid rgba(120, 150, 180, .28); border-radius: 12px;
+    padding: 10px 12px; font-size: 16px; line-height: 1.5;
+    -webkit-user-select: text; user-select: text;
+  }
+  #ta:focus { outline: none; border-color: rgba(62, 207, 142, .6); }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .keys button {
+    flex: 1 1 auto; min-width: 64px; padding: 10px 8px;
+    background: var(--glass-solid); color: var(--glass-text); border: 1px solid var(--glass-border);
+    border-radius: 10px; font-size: 13px; cursor: pointer;
+  }
+  .keys button:active { background: rgba(255, 255, 255, .2); }
+  .keys .wide { flex: 2 1 120px; }
+
+  /* 网页自绘键盘 */
+  .kbhead {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px; font-size: 12px; color: #7d8fa1;
+  }
+  .kbhead span { flex: 1; }
+  .mini {
+    padding: 6px 12px; border-radius: 8px; font-size: 13px;
+    background: var(--glass-solid); color: var(--glass-text); border: 1px solid var(--glass-border);
+  }
+  #kbPad { display: flex; flex-direction: column; gap: 6px; }
+  .kbrow { display: flex; gap: 6px; }
+  .kbrow.indent1 { padding: 0 5%; }
+  .kbrow.indent2 { padding: 0 2.5%; }
+  .kbkey {
+    flex: 1 1 0; min-width: 0; height: 44px;
+    border-radius: 9px; font-size: 15px;
+    /* iOS 风格毛玻璃：白膜 + 发丝边 + 顶部内高光（键太多，不做 backdrop-filter） */
+    background: linear-gradient(180deg, var(--glass-key-top) 0%, var(--glass-key-bot) 100%);
+    color: var(--glass-text);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-inner),
+                0 1px 2px rgba(0, 0, 0, .18);
+    display: grid; place-items: center;
+    -webkit-user-select: none; user-select: none;
+  }
+  .kbkey:active { background: var(--glass-hover); }
+  .kbkey.on {
+    background: rgba(62, 207, 142, .18);
+    border-color: rgba(62, 207, 142, .55);
+    color: #8fe3bd;
+  }
+  .kbkey.mod { flex: 1.35 1 0; font-size: 13px; color: #9fb0c2; }
+  .kbkey.space { flex: 4.2 1 0; }
+  .kbkey.fn { flex: 1.25 1 0; font-size: 13px; }
+  #kbRawBox { display: none; margin-top: 10px; }
+  #kbRawBox.open { display: block; }
+
+  /* 全屏键盘 + 触控板 */
+  #kbfull {
+    position: fixed; inset: 0; z-index: 60;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #kbfull.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
+  .kfbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #7d8fa1; }
+  .kfbar span { flex: 1; }
+  #kfPad { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  #kfPad .kbrow { flex: 1; gap: 8px; }
+  #kfPad .kbkey { height: auto; font-size: 19px; border-radius: 12px; }
+  #kfPad .kbkey.mod, #kfPad .kbkey.fn { font-size: 15px; }
+  .kbkey.hit { background: #2c4a3c !important; border-color: rgba(62, 207, 142, .5) !important; }
+
+  /* F / J 键位横杆：和实体键盘的定位凸起一样，盲打时手指有参照 */
+  .kbkey { position: relative; }
+  /* F 键分组的间隔，以及行尾的占位块 */
+  .kbkey.gap { margin-left: 10px; }
+  .kbkey.ghost { visibility: hidden; pointer-events: none; }
+  .kbkey.home::after {
+    content: ''; position: absolute; left: 50%; bottom: 6px;
+    width: 12px; height: 2px; border-radius: 2px;
+    background: currentColor; opacity: .55; transform: translateX(-50%);
+  }
+
+  /* 键盘形态切换条（每种键盘里都有） */
+  .modebar { display: flex; gap: 5px; margin-left: auto; }
+  .modebar .mini { padding: 4px 9px; font-size: 12px; }
+  .modebar .mini.on {
+    background: rgba(62, 207, 142, .18);
+    border-color: rgba(62, 207, 142, .55);
+    color: #8fe3bd;
+  }
+
+  /* 全屏键盘顶部的触控条 */
+  #kfStrip {
+    /* 三指要能同时落在条里：太矮的话第三根手指经常落到键盘上，手势就失效了 */
+    height: 90px; margin-bottom: 8px; border-radius: 12px;
+    border: 1px solid rgba(120, 150, 180, .22);
+    background: radial-gradient(420px 120px at 50% 50%,
+                rgba(24, 34, 45, .42) 0%, rgba(14, 21, 29, .3) 70%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 8px 16px; text-align: center; line-height: 1.5;
+    color: #5d6b7a; font-size: 12.5px; touch-action: none;
+  }
+  #kfStrip b { color: #7d8d9d; font-weight: 500; }
+
+  /* 键盘的封面背景：和主页 #bgCover 用同一张图、同一套模糊和压暗 */
+  .artbg {
+    position: absolute; inset: 0; overflow: hidden;
+    pointer-events: none; z-index: 0;
+    opacity: 0; transition: opacity 1.1s var(--ease-out);
+  }
+  html.art-on .artbg { opacity: 1; }
+  .artbg::before {
+    content: ''; position: absolute; inset: -12%;
+    background: var(--art-url, none) center / cover no-repeat;
+    filter: blur(90px) saturate(1.7) brightness(.9);
+    transform: scale(1.1);
+  }
+  /* 压暗，保证键帽和文字清晰 */
+  .artbg::after {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 30%,
+        rgba(10, 14, 20, .30) 0%, rgba(10, 14, 20, .72) 70%),
+      linear-gradient(180deg,
+        rgba(9, 12, 17, .55) 0%, rgba(9, 12, 17, .78) 100%);
+  }
+  /* 内容压在背景层之上（悬浮球自己带 z-index，别动它） */
+  #kbfull > :not(.artbg):not(.kf-nub),
+  #splitmode > :not(.artbg),
+  #trmode > :not(.artbg) { position: relative; z-index: 1; }
+
+  /* 键盘中间的红色迷你触控点：位置由 JS 量出来，这里只管长相 */
+  #kbfull { position: fixed; }          /* 保证绝对定位的参照系 */
+  .kf-nub {
+    position: absolute; z-index: 5;
+    width: 44px; height: 44px; padding: 0;
+    border-radius: 50%;
+    /* 扁平化：一层半透明深色 + 背景模糊，和灵动岛同一观感，不用渐变和光晕 */
+    background: rgba(10, 14, 18, .72);
+    border: 1px solid rgba(255, 255, 255, .22);
+    backdrop-filter: blur(16px) saturate(1.15);
+    -webkit-backdrop-filter: blur(16px) saturate(1.15);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+    touch-action: none; cursor: pointer;
+    transition: background-color .18s ease, border-color .18s ease,
+                transform .18s var(--ease-spring);
+  }
+  .kf-nub.down {
+    background: rgba(44, 58, 74, .8);
+    border-color: rgba(255, 255, 255, .38);
+    transform: scale(.96);
+  }
+  .kf-nub.drag {
+    background: rgba(26, 35, 45, .8);
+    border-color: rgba(255, 255, 255, .3);
+    transform: scale(1.05);
+  }
+
+  /* Shift 锁定提示：键面右上角的锁 */
+  .kbkey.locked::after {
+    content: ''; position: absolute; right: 7px; top: 6px;
+    width: 11px; height: 11px; opacity: .95;
+    background: no-repeat center/contain
+      url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236ee7b7' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2.4'/%3E%3Cpath d='M8 10.5V7.6a4 4 0 0 1 8 0v2.9'/%3E%3C/svg%3E");
+  }
+  .kbkey.locked {
+    border-color: rgba(62, 207, 142, .45) !important;
+    color: #6ee7b7 !important;
+  }
+
+  /* Caps 的纯白指示灯 */
+  .capsled {
+    position: absolute; left: 50%; bottom: 7px;
+    width: 6px; height: 6px; margin-left: -3px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .16);
+    transition: background .18s ease, box-shadow .18s ease;
+  }
+  .kbkey.capson .capsled {
+    background: #fff;
+    box-shadow: 0 0 7px rgba(255, 255, 255, .75);
+  }
+
+  /* 分屏：键盘为主 + 小触控板 */
+  #splitmode {
+    position: fixed; inset: 0; z-index: 60;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #splitmode.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
+  .spbody { flex: 1; display: flex; gap: 10px; min-height: 0; }
+  #spKeys { flex: 3.4 1 0; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  #spPad {
+    flex: 1 1 0; min-width: 110px; border-radius: 16px;
+    background: radial-gradient(600px 400px at 50% 40%,
+                rgba(24, 34, 45, .52) 0%, rgba(14, 21, 29, .40) 70%);
+    border: 1px solid rgba(120, 150, 180, .22);
+    touch-action: none;
+  }
+  #spKeys .kbrow { flex: 1; gap: 7px; }
+  #spKeys .kbkey { height: auto; font-size: 17px; border-radius: 11px; }
+  #spKeys .kbkey.mod, #spKeys .kbkey.fn { font-size: 13px; }
+  @media (orientation: portrait) {
+    .spbody { flex-direction: column; }
+    #spKeys { flex: 3 1 0; }
+    #spPad { flex: 1 1 0; min-height: 90px; min-width: 0; }
+  }
+
+  /* 环绕：上方打字区 + 下方 3:2 触控板 + 两侧功能区 */
+  #trmode {
+    position: fixed; inset: 0; z-index: 60;
+    display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.988);
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s linear .38s;
+    background: #0b1016;
+    padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+    touch-action: none;
+  }
+  #trmode.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transform: none;
+    transition: opacity .38s var(--ease-out),
+                transform .5s var(--ease-spring),
+                visibility 0s;
+  }
+  #trTop { flex: 3 1 0; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  #trTop .kbrow { flex: 1; gap: 6px; }
+  #trTop .kbkey { height: auto; font-size: 17px; border-radius: 11px; }
+  #trTop .kbkey.mod, #trTop .kbkey.fn { font-size: 13px; }
+  #trBottom { flex: 2.1 1 0; display: flex; gap: 8px; min-height: 0; margin-top: 8px; }
+  .trfunc {
+    flex: 1 1 0; min-width: 92px;
+    display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 6px;
+  }
+  .trfunc .kbkey { height: auto; font-size: 12px; border-radius: 9px; }
+  #trPad {
+    flex: 0 0 auto; height: 100%; aspect-ratio: 3 / 2; max-width: 58%;
+    border-radius: 14px; touch-action: none;
+    background: radial-gradient(500px 340px at 50% 45%,
+                rgba(24, 34, 45, .52) 0%, rgba(14, 21, 29, .40) 70%);
+    border: 1px solid rgba(120, 150, 180, .22);
+  }
+  @media (orientation: portrait) {
+    #trTop { flex: 2.6 1 0; }
+    #trBottom { flex: 1.8 1 0; }
+    .trfunc { min-width: 74px; }
+  }
+
+/* ===== 数字键盘激活态：iOS 毛玻璃（覆盖前面两处旧定义，必须放最后） ===== */
+#numpad.active {
+  background: var(--glass-solid);
+  border-color: var(--glass-border);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);
+}
