@@ -1,5 +1,5 @@
 ﻿# PadTrack 控制中心（自绘界面，风格对齐网页端）
-param([switch]$Test, [switch]$Compile, [switch]$DataTest)
+param([switch]$Test, [switch]$Compile, [switch]$DataTest, [switch]$Bench)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
@@ -58,6 +58,11 @@ public class PadCenter : Form
     private Font fTitle, fSub, fLine, fLineB, fBtn, fLog, fTag;
     private Rectangle cardA, cardB;
     private float scale = 1f, offX = 0f, offY = 0f;
+    private Bitmap bgCache = null;
+    private Size bgCacheSize = Size.Empty;
+    private Bitmap logCache = null;
+    private string logCacheText = null;
+    private Size logCacheSize = Size.Empty;
 
     private static readonly Color Accent = Color.FromArgb(62, 207, 142);
     private static readonly Color TextMain = Color.FromArgb(226, 236, 246);
@@ -204,13 +209,15 @@ public class PadCenter : Form
             {
                 int roundPref = 2;   // 大圆角
                 DwmSetWindowAttribute(Handle, 33, ref roundPref, sizeof(int));
-                int acrylic = 3;     // 亚克力
-                int code = DwmSetWindowAttribute(Handle, 38, ref acrylic, sizeof(int));
+                // Mica 用壁纸采样，拖动时不用每帧重算模糊；亚克力会卡
+                int mica = 2;
+                int code = DwmSetWindowAttribute(Handle, 38, ref mica, sizeof(int));
                 if (code == 0) { GlassOn = true; return; }
             }
 
             AccentPolicy ap = new AccentPolicy();
-            ap.AccentState = 4;
+            // 3 = ACCENT_ENABLE_BLURBEHIND，比 4（亚克力）轻很多，拖动不卡
+            ap.AccentState = 3;
             ap.AccentFlags = 2;
             ap.GradientColor = unchecked((int)0xA80C1117);
             int size = Marshal.SizeOf(ap);
@@ -265,24 +272,9 @@ public class PadCenter : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
+        // 背景（渐变 + 柔光）很少变，缓存成位图，重复绘制只做一次 blit
         Rectangle full = new Rectangle(0, 0, (int)DesignW, (int)DesignH);
-        int a1 = GlassOn ? 168 : 255;
-        int a2 = GlassOn ? 200 : 255;
-        using (LinearGradientBrush bg = new LinearGradientBrush(full,
-            Color.FromArgb(a1, 19, 25, 33), Color.FromArgb(a2, 9, 12, 17), 90f))
-        {
-            g.FillRectangle(bg, full);
-        }
-        using (GraphicsPath glow = new GraphicsPath())
-        {
-            glow.AddEllipse(-160, -220, 620, 420);
-            using (PathGradientBrush pb = new PathGradientBrush(glow))
-            {
-                pb.CenterColor = Color.FromArgb(26, 62, 207, 142);
-                pb.SurroundColors = new Color[] { Color.FromArgb(0, 62, 207, 142) };
-                g.FillPath(pb, glow);
-            }
-        }
+        g.DrawImageUnscaled(GetBackground(full.Width, full.Height), 0, 0);
 
         using (SolidBrush b = new SolidBrush(TextMain))
             g.DrawString("PadTrack 控制中心", fTitle, b, 22, 20);
@@ -323,19 +315,71 @@ public class PadCenter : Form
         using (SolidBrush b = new SolidBrush(Color.FromArgb(120, 8, 11, 15)))
             g.FillPath(b, Round(inner, 10));
 
-        RectangleF txt = new RectangleF(inner.X + 12, inner.Y + 10,
-                                        inner.Width - 24, inner.Height - 20);
-        Region oldClip = g.Clip;
-        g.SetClip(inner);
-        using (StringFormat sf = new StringFormat())
-        {
-            sf.Trimming = StringTrimming.None;
-            using (SolidBrush b = new SolidBrush(Color.FromArgb(170, 185, 200)))
-                g.DrawString(LogText ?? "", fLog, b, txt, sf);
-        }
-        g.Clip = oldClip;
+        Rectangle txtRect = new Rectangle(inner.X + 12, inner.Y + 10,
+                                          inner.Width - 24, inner.Height - 20);
+        g.DrawImageUnscaled(GetLogImage(txtRect.Width, txtRect.Height), txtRect.X, txtRect.Y);
 
         foreach (PadButton cap in Caps) DrawCap(g, cap);
+    }
+
+    private Bitmap GetLogImage(int w, int h)
+    {
+        string text = LogText ?? "";
+        if (logCache != null && logCacheSize.Width == w && logCacheSize.Height == h
+            && logCacheText == text)
+            return logCache;
+
+        if (logCache != null) { logCache.Dispose(); logCache = null; }
+        if (w <= 0 || h <= 0) { w = 1; h = 1; }
+
+        Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (Graphics gg = Graphics.FromImage(bmp))
+        {
+            gg.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            using (StringFormat sf = new StringFormat())
+            {
+                sf.Trimming = StringTrimming.None;
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(170, 185, 200)))
+                    gg.DrawString(text, fLog, b, new RectangleF(0, 0, w, h), sf);
+            }
+        }
+        logCache = bmp;
+        logCacheText = text;
+        logCacheSize = new Size(w, h);
+        return logCache;
+    }
+
+    private Bitmap GetBackground(int w, int h)
+    {
+        if (bgCache != null && bgCacheSize.Width == w && bgCacheSize.Height == h) return bgCache;
+        if (bgCache != null) { bgCache.Dispose(); bgCache = null; }
+
+        Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (Graphics gg = Graphics.FromImage(bmp))
+        {
+            gg.SmoothingMode = SmoothingMode.AntiAlias;
+            int a1 = GlassOn ? 168 : 255;
+            int a2 = GlassOn ? 200 : 255;
+            using (LinearGradientBrush bg = new LinearGradientBrush(
+                new Rectangle(0, 0, w, h),
+                Color.FromArgb(a1, 19, 25, 33), Color.FromArgb(a2, 9, 12, 17), 90f))
+            {
+                gg.FillRectangle(bg, 0, 0, w, h);
+            }
+            using (GraphicsPath glow = new GraphicsPath())
+            {
+                glow.AddEllipse(-160, -220, 620, 420);
+                using (PathGradientBrush pb = new PathGradientBrush(glow))
+                {
+                    pb.CenterColor = Color.FromArgb(26, 62, 207, 142);
+                    pb.SurroundColors = new Color[] { Color.FromArgb(0, 62, 207, 142) };
+                    gg.FillPath(pb, glow);
+                }
+            }
+        }
+        bgCache = bmp;
+        bgCacheSize = new Size(w, h);
+        return bgCache;
     }
 
     private void DrawCard(Graphics g, Rectangle r)
@@ -771,6 +815,23 @@ if ($DataTest) {
     } catch {
         "刷新出错: " + $_.Exception.ToString()
     }
+    exit 0
+}
+
+if ($Bench) {
+    Refresh-Ui
+    $ui.CreateControl()
+    $bmp = New-Object System.Drawing.Bitmap 640, 700
+    $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 640, 700))
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    for ($i = 0; $i -lt 40; $i++) {
+        $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 640, 700))
+    }
+    $sw.Stop()
+    "40 帧总耗时: " + $sw.ElapsedMilliseconds + "ms"
+    "单帧: " + [Math]::Round($sw.Elapsed.TotalMilliseconds / 40, 2) + "ms"
+    "玻璃: " + $ui.GlassOn
+    $bmp.Dispose()
     exit 0
 }
 
