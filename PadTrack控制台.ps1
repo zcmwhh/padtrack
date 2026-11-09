@@ -97,6 +97,9 @@ public class PadCenter : Form
 
     private Rectangle addrRect = Rectangle.Empty;
     private string addrUrl = "";
+    private readonly List<Rectangle> chipRects = new List<Rectangle>();
+    private readonly List<string> chipUrls = new List<string>();
+    private int chipHot = -1;
     private DateTime toastAt = DateTime.MinValue;
 
     private Bitmap frameCache = null;
@@ -633,6 +636,8 @@ public class PadCenter : Form
 
     private void RenderAll(Graphics g)
     {
+        chipRects.Clear();
+        chipUrls.Clear();
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
@@ -686,6 +691,29 @@ public class PadCenter : Form
                 SizeF sz = g.MeasureString(value, fLineB);
                 addrRect = new Rectangle(cardA.X + 146, (int)y - 2, (int)sz.Width + 8, (int)sz.Height + 4);
                 addrUrl = value;        // 点哪行复制哪行
+
+                // 右侧的「复制」小胶囊
+                Rectangle chip = new Rectangle(cardA.Right - 74, (int)y - 1, 52, 22);
+                bool hot = chipRects.Count == chipHot;
+                Color chipFill = hot ? Color.FromArgb(120, 62, 207, 142)
+                                     : Color.FromArgb(26, 255, 255, 255);
+                Color chipText = hot ? Color.FromArgb(10, 20, 14)
+                                     : Color.FromArgb(190, 205, 220);
+                using (GraphicsPath cp = Round(chip, 11))
+                {
+                    using (SolidBrush cb = new SolidBrush(chipFill)) g.FillPath(cb, cp);
+                    using (Pen cpen = new Pen(Color.FromArgb(hot ? 150 : 46, 255, 255, 255), 1f))
+                        g.DrawPath(cpen, cp);
+                }
+                using (StringFormat sf = new StringFormat())
+                {
+                    sf.Alignment = StringAlignment.Center;
+                    sf.LineAlignment = StringAlignment.Center;
+                    using (SolidBrush tb = new SolidBrush(chipText))
+                        g.DrawString("复制", fTag, tb, chip, sf);
+                }
+                chipRects.Add(chip);
+                chipUrls.Add(value);
             }
             y += 28;
         }
@@ -846,6 +874,12 @@ public class PadCenter : Form
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        PointF lp0 = ToDesign(e.Location);
+        int ch = -1;
+        for (int i = 0; i < chipRects.Count; i++)
+            if (chipRects[i].Contains((int)lp0.X, (int)lp0.Y)) ch = i;
+        if (ch != chipHot) { chipHot = ch; frameDirty = true; Invalidate(); }
+
         int idx = HitIndex(e.Location);
         if (idx != hot) { hot = idx; Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default; }
         base.OnMouseMove(e);
@@ -862,6 +896,21 @@ public class PadCenter : Form
     protected override void OnMouseUp(MouseEventArgs e)
     {
         int hit = HitIndex(e.Location);
+        PointF lpClick = ToDesign(e.Location);
+        for (int i = 0; i < chipRects.Count; i++)
+        {
+            if (chipRects[i].Contains((int)lpClick.X, (int)lpClick.Y))
+            {
+                try { Clipboard.SetText(chipUrls[i]); } catch { }
+                toastAt = DateTime.Now;
+                frameDirty = true;
+                Invalidate();
+                down = -1;
+                base.OnMouseUp(e);
+                return;
+            }
+        }
+
         if (hit >= 0 && hit == down)
         {
             if (hit >= 1000)
