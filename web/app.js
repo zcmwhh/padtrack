@@ -321,8 +321,13 @@
   }
 
   // 封面背景：有封面且开关打开才显示
+  // 键盘（全屏/分屏/环绕）共用同一张图，通过 --art-url 传给 .artbg 图层
   function applyBgCover() {
-    bgCoverEl.classList.toggle('on', S.coverBg === true && !!bgUrl);
+    const on = S.coverBg === true && !!bgUrl;
+    bgCoverEl.classList.toggle('on', on);
+    document.documentElement.classList.toggle('art-on', on);
+    document.documentElement.style.setProperty(
+      '--art-url', bgUrl ? `url("${bgUrl}")` : 'none');
   }
 
   // 换背景：新图在背面层加载好再淡入，旧图同时淡出

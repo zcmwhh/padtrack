@@ -759,6 +759,33 @@
   }
   #kfStrip b { color: #7d8d9d; font-weight: 500; }
 
+  /* 键盘的封面背景：和主页 #bgCover 用同一张图、同一套模糊和压暗 */
+  .artbg {
+    position: absolute; inset: 0; overflow: hidden;
+    pointer-events: none; z-index: 0;
+    opacity: 0; transition: opacity 1.1s var(--ease-out);
+  }
+  html.art-on .artbg { opacity: 1; }
+  .artbg::before {
+    content: ''; position: absolute; inset: -12%;
+    background: var(--art-url, none) center / cover no-repeat;
+    filter: blur(90px) saturate(1.7) brightness(.9);
+    transform: scale(1.1);
+  }
+  /* 压暗，保证键帽和文字清晰 */
+  .artbg::after {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 30%,
+        rgba(10, 14, 20, .40) 0%, rgba(10, 14, 20, .80) 70%),
+      linear-gradient(180deg,
+        rgba(9, 12, 17, .62) 0%, rgba(9, 12, 17, .86) 100%);
+  }
+  /* 内容压在背景层之上（悬浮球自己带 z-index，别动它） */
+  #kbfull > :not(.artbg):not(.kf-nub),
+  #splitmode > :not(.artbg),
+  #trmode > :not(.artbg) { position: relative; z-index: 1; }
+
   /* 键盘中间的红色迷你触控点：位置由 JS 量出来，这里只管长相 */
   #kbfull { position: fixed; }          /* 保证绝对定位的参照系 */
   .kf-nub {
