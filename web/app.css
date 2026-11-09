@@ -195,6 +195,16 @@
   }
 
 
+  /* 退格 / 回车 / 空格用图标：尺寸固定，颜色跟随按钮 */
+  .kbkey.icon { display: flex; align-items: center; justify-content: center; }
+  .kbkey.icon svg {
+    width: 21px; height: 21px;
+    fill: none; stroke: currentColor; stroke-width: 1.85;
+    stroke-linecap: round; stroke-linejoin: round;
+    pointer-events: none;
+  }
+  #kfPad .kbkey.icon svg, #trTop .kbkey.icon svg { width: 24px; height: 24px; }
+
   /* 按键按压反馈：轻微内缩 + 高亮，接近实体键盘手感 */
   .kbkey {
     transition: transform .16s var(--ease-spring), background .16s ease,

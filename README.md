@@ -125,7 +125,9 @@ Ctrl  Win  Alt  [    空格    ]  Alt  Fn  菜单  Ctrl ← ↓ →
 ```
 
 - **F 和 J 键下方有横杆**（和实体键盘的定位凸起一样），盲打时手指有参照点；
-- 键名用标准叫法：退格 = Backspace、回车 = Enter、空格 = Space、菜单 = Menu，其余保持 Tab / Caps / Shift / Ctrl / Alt / Win / Fn；
+- 键名用标准叫法：菜单 = Menu，其余保持 Tab / Caps / Shift / Ctrl / Alt / Win / Fn；
+- **退格 / 回车 / 空格用图标**而不是文字（内联 SVG）：`⌫ ⏎` 这类字符在部分安卓机型上
+  会被渲染成彩色 emoji，和界面风格冲突，所以统一画成单色线条图标；
 - Shift / Ctrl / Alt / Win 是「点一下点亮、再点取消」的临时修饰键；
 - F 键按 F1-F4 / F5-F8 / F9-F12 分组，和实体键盘的分段一致；Fn 在触屏上没有对应功能，点了会提示。
 

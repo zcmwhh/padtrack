@@ -1401,6 +1401,23 @@
   const K = (label, vk, w, cls) => ({ label, vk, w, cls });
   const TXT = (label, vk, w) => ({ label, vk, w });
 
+  // 退格 / 回车 / 空格用图标，不用中文也不用 ⌫⏎ 这类字符
+  // （那些字符在安卓上可能被渲染成彩色 emoji，和界面风格冲突）
+  const KEY_ICONS = {
+    backspace:
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M10 5.5h8.6a1.9 1.9 0 0 1 1.9 1.9v9.2a1.9 1.9 0 0 1-1.9 1.9H10L4.1 12z"/>' +
+      '<path d="M13.1 9.6l4.8 4.8M17.9 9.6l-4.8 4.8"/></svg>',
+    enter:
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M19 4.6v8.1a3 3 0 0 1-3 3H5.4"/>' +
+      '<path d="M9.4 11.9 5.4 15.7l4 3.8"/></svg>',
+    space:
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M5.2 9.6v4.8h13.6V9.6"/></svg>',
+  };
+  const KI = (icon, vk, w, cls) => ({ icon, vk, w, cls });
+
   // 完整 104 键布局：和电脑键盘一一对应，哪根手指按哪个键不用重新记
   const LAYER_MAIN = [
     { h: 0.78, keys: [
@@ -1413,7 +1430,7 @@
     { keys: [
       K('`~',0xC0),K('1!',0x31),K('2@',0x32),K('3#',0x33),K('4$',0x34),
       K('5%',0x35),K('6^',0x36),K('7&',0x37),K('8*',0x38),K('9(',0x39),
-      K('0)',0x30),K('-_',0xBD),K('=+',0xBB),K('退格',0x08,2.2,'fn'),
+      K('0)',0x30),K('-_',0xBD),K('=+',0xBB),KI('backspace',0x08,2.2,'fn'),
     ] },
     { keys: [
       K('Tab',0x09,1.6,'fn'),
@@ -1425,7 +1442,7 @@
       K('Caps',0x14,1.85,'fn'),
       K('A',0x41),K('S',0x53),K('D',0x44),K('F',0x46,1,'home'),K('G',0x47),
       K('H',0x48),K('J',0x4A,1,'home'),K('K',0x4B),K('L',0x4C),
-      K(';:',0xBA),K('"\'',0xDE),K('回车',0x0D,2.3,'fn'),
+      K(';:',0xBA),K('"\'',0xDE),KI('enter',0x0D,2.3,'fn'),
     ] },
     { keys: [
       K('Shift',0x10,2.35,'mod'),
@@ -1435,7 +1452,7 @@
     ] },
     { keys: [
       K('Ctrl',0x11,1.35,'mod'),K('Win',0x5B,1.05,'mod'),K('Alt',0x12,1.05,'mod'),
-      K('空格',0x20,6.6,'space'),
+      KI('space',0x20,6.6,'space'),
       K('Alt',0x12,1.05,'mod'),K('Fn',0,1.05,'fn'),K('菜单',0x5D,1.05,'fn'),
       K('Ctrl',0x11,1.35,'mod'),
       K('←',0x25,1,'fn'),K('↓',0x28,1,'fn'),K('→',0x27,1,'fn'),
@@ -1485,7 +1502,12 @@
         const b = document.createElement('button');
         b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
         if (key.w) b.style.flexGrow = String(key.w);
-        b.textContent = key.label;
+        if (key.icon) {
+          b.className += ' icon';
+          b.innerHTML = KEY_ICONS[key.icon] || '';
+        } else {
+          b.textContent = key.label;
+        }
         b.dataset.vk = key.vk;
         if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
         r.appendChild(b);
@@ -1787,7 +1809,7 @@
     { keys: [
       K('`~',0xC0,1,'fn'),TXT('1!',0x31),TXT('2@',0x32),TXT('3#',0x33),TXT('4$',0x34),
       TXT('5%',0x35),TXT('6^',0x36),TXT('7&',0x37),TXT('8*',0x38),TXT('9(',0x39),
-      TXT('0)',0x30),K('- _',0xBD,1,'fn'),K('= +',0xBB,1,'fn'),K('⌫',0x08,1.7,'fn'),
+      TXT('0)',0x30),K('- _',0xBD,1,'fn'),K('= +',0xBB,1,'fn'),KI('backspace',0x08,1.7,'fn'),
     ] },
     // 第 2 行：Tab + Q…P + [ ] \
     { keys: [
@@ -1800,7 +1822,7 @@
       K('Caps',0x14,1.75,'fn'),TXT('A',0x41),TXT('S',0x53),TXT('D',0x44),
       K('F',0x46,1,'home'),TXT('G',0x47),TXT('H',0x48),K('J',0x4A,1,'home'),
       TXT('K',0x4B),TXT('L',0x4C),K(';:',0xBA,1,'fn'),K("'\"",0xDE,1,'fn'),
-      K('回车',0x0D,2,'fn'),
+      KI('enter',0x0D,2,'fn'),
     ] },
     // 第 4 行：Shift + Z…M + , . / + Shift
     { keys: [
@@ -1811,7 +1833,7 @@
     // 第 5 行：Ctrl Win Alt 空格 Alt Fn 菜单 Ctrl
     { keys: [
       K('Ctrl',0x11,1.35,'mod'),K('Win',0x5B,1.2,'mod'),K('Alt',0x12,1.2,'mod'),
-      K('空格',0x20,6.4,'space'),K('Alt',0x12,1.2,'mod'),K('Fn',0xFF,1,'fn'),
+      KI('space',0x20,6.4,'space'),K('Alt',0x12,1.2,'mod'),K('Fn',0xFF,1,'fn'),
       K('菜单',0x5D,1.15,'fn'),K('Ctrl',0x11,1.35,'mod'),
     ] },
   ];
@@ -1831,7 +1853,12 @@
         const b = document.createElement('button');
         b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
         if (key.w) b.style.flexGrow = String(key.w);
-        b.textContent = key.label;
+        if (key.icon) {
+          b.className += ' icon';
+          b.innerHTML = KEY_ICONS[key.icon] || '';
+        } else {
+          b.textContent = key.label;
+        }
         b.dataset.vk = key.vk;
         r.appendChild(b);
       });
