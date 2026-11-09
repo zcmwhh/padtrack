@@ -31,8 +31,10 @@
     position: fixed; inset: 0;
     touch-action: none;
     background:
-      radial-gradient(1400px 900px at 25% 15%, #17222e 0%, #0d1117 62%),
-      radial-gradient(900px 600px at 85% 90%, #131a24 0%, transparent 70%);
+      radial-gradient(1400px 900px at 25% 15%,
+        rgba(23, 34, 46, .82) 0%, rgba(13, 17, 23, .72) 62%),
+      radial-gradient(900px 600px at 85% 90%,
+        rgba(19, 26, 36, .70) 0%, transparent 70%);
   }
   #hint {
     z-index: 10;
@@ -603,7 +605,7 @@
   }
   .round {
     width: 46px; height: 46px; border-radius: 50%;
-    background: rgba(22, 30, 40, .78); border: 1px solid rgba(120, 150, 180, .2);
+    background: rgba(22, 30, 40, .78); border: 1px solid rgba(120, 150, 180, .22);
     color: #c7d5e3; font-size: 19px; display: grid; place-items: center;
     backdrop-filter: blur(8px); cursor: pointer;
   }
@@ -659,7 +661,7 @@
   .keys { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .keys button {
     flex: 1 1 auto; min-width: 64px; padding: 10px 8px;
-    background: #1b242e; color: #c7d5e3; border: 1px solid rgba(120, 150, 180, .2);
+    background: rgba(27, 36, 46, .44); color: #cfdcea; border: 1px solid rgba(120, 150, 180, .2);
     border-radius: 10px; font-size: 13px; cursor: pointer;
   }
   .keys button:active { background: #2a3746; }
@@ -687,7 +689,7 @@
     display: grid; place-items: center;
     -webkit-user-select: none; user-select: none;
   }
-  .kbkey:active { background: #2a3746; }
+  .kbkey:active { background: rgba(46, 60, 76, .78); }
   .kbkey.on {
     background: rgba(62, 207, 142, .18);
     border-color: rgba(62, 207, 142, .55);
@@ -752,7 +754,8 @@
     /* 三指要能同时落在条里：太矮的话第三根手指经常落到键盘上，手势就失效了 */
     height: 90px; margin-bottom: 8px; border-radius: 12px;
     border: 1px solid rgba(120, 150, 180, .22);
-    background: radial-gradient(420px 120px at 50% 50%, #16212c 0%, #0e151d 70%);
+    background: radial-gradient(420px 120px at 50% 50%,
+                rgba(24, 34, 45, .42) 0%, rgba(14, 21, 29, .3) 70%);
     display: flex; align-items: center; justify-content: center;
     padding: 8px 16px; text-align: center; line-height: 1.5;
     color: #5d6b7a; font-size: 12.5px; touch-action: none;
@@ -777,9 +780,9 @@
     content: ''; position: absolute; inset: 0;
     background:
       radial-gradient(120% 90% at 50% 30%,
-        rgba(10, 14, 20, .40) 0%, rgba(10, 14, 20, .80) 70%),
+        rgba(10, 14, 20, .30) 0%, rgba(10, 14, 20, .72) 70%),
       linear-gradient(180deg,
-        rgba(9, 12, 17, .62) 0%, rgba(9, 12, 17, .86) 100%);
+        rgba(9, 12, 17, .55) 0%, rgba(9, 12, 17, .78) 100%);
   }
   /* 内容压在背景层之上（悬浮球自己带 z-index，别动它） */
   #kbfull > :not(.artbg):not(.kf-nub),
@@ -862,7 +865,8 @@
   #spKeys { flex: 3.4 1 0; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
   #spPad {
     flex: 1 1 0; min-width: 110px; border-radius: 16px;
-    background: radial-gradient(600px 400px at 50% 40%, #16212c 0%, #0e151d 70%);
+    background: radial-gradient(600px 400px at 50% 40%,
+                rgba(24, 34, 45, .52) 0%, rgba(14, 21, 29, .40) 70%);
     border: 1px solid rgba(120, 150, 180, .22);
     touch-action: none;
   }
@@ -908,7 +912,8 @@
   #trPad {
     flex: 0 0 auto; height: 100%; aspect-ratio: 3 / 2; max-width: 58%;
     border-radius: 14px; touch-action: none;
-    background: radial-gradient(500px 340px at 50% 45%, #16212c 0%, #0e151d 70%);
+    background: radial-gradient(500px 340px at 50% 45%,
+                rgba(24, 34, 45, .52) 0%, rgba(14, 21, 29, .40) 70%);
     border: 1px solid rgba(120, 150, 180, .22);
   }
   @media (orientation: portrait) {
