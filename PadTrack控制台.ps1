@@ -85,6 +85,9 @@ public class PadCenter : Form
     private Rectangle cardA, cardB;
     private float scale = 1f, offX = 0f, offY = 0f;
 
+    private Rectangle addrRect = Rectangle.Empty;
+    private DateTime toastAt = DateTime.MinValue;
+
     private Bitmap frameCache = null;
     private bool frameDirty = true;
     private bool dragging = false;
@@ -143,11 +146,11 @@ public class PadCenter : Form
         fTag = new Font("Microsoft YaHei UI", 8f);
 
         cardA = new Rectangle(20, 92, 600, 176);
-        cardB = new Rectangle(20, 404, 600, 276);
+        cardB = new Rectangle(20, 448, 600, 232);
 
-        Caps.Add(MakeCap("min", 472, 14));
-        Caps.Add(MakeCap("max", 512, 14));
-        Caps.Add(MakeCap("close", 552, 14));
+        Caps.Add(MakeCap("min", 508, 14));
+        Caps.Add(MakeCap("max", 548, 14));
+        Caps.Add(MakeCap("close", 588, 14));
 
         anim = new System.Windows.Forms.Timer();
         anim.Interval = 16;
@@ -600,6 +603,11 @@ public class PadCenter : Form
                 g.DrawString(label, fLine, b, cardA.X + 38, y);
             using (SolidBrush b = new SolidBrush(TextMain))
                 g.DrawString(value, fLineB, b, cardA.X + 150, y);
+            if (label == "平板地址")
+            {
+                SizeF sz = g.MeasureString(value, fLineB);
+                addrRect = new Rectangle(cardA.X + 146, (int)y - 2, (int)sz.Width + 8, (int)sz.Height + 4);
+            }
             y += 28;
         }
 
@@ -626,6 +634,21 @@ public class PadCenter : Form
         g.Clip = oldClip;
 
         foreach (PadButton cap in Caps) DrawCap(g, cap);
+
+        // 复制后的提示
+        if ((DateTime.Now - toastAt).TotalSeconds < 1.8)
+        {
+            string t = "地址已复制";
+            SizeF sz = g.MeasureString(t, fTag);
+            RectangleF box = new RectangleF((DesignW - sz.Width - 32) / 2f, 660, sz.Width + 32, 26);
+            using (GraphicsPath p = Round(box, 13))
+            {
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(230, 40, 190, 130)))
+                    g.FillPath(b, p);
+            }
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(255, 10, 20, 14)))
+                g.DrawString(t, fTag, b, box.X + 16, box.Y + 5);
+        }
     }
 
     private void DrawCard(Graphics g, Rectangle r)
@@ -691,23 +714,31 @@ public class PadCenter : Form
         Color fill, border, text;
         if (b.Kind == 1)
         {
-            fill = Color.FromArgb((int)(210 + 40 * b.Hover), Accent);
-            border = Color.FromArgb(255, 120, 230, 180);
+            // 只有"当下能用"的主操作才是绿色，否则会误导
+            int a = (int)(200 + 55 * b.Hover);
+            fill = Color.FromArgb(a, Mix(Accent, Color.FromArgb(120, 255, 190), b.Hover));
+            border = Color.FromArgb(255, 150, 240, 200);
             text = Color.FromArgb(10, 16, 12);
         }
         else if (b.Kind == 2)
         {
-            fill = Mix(Color.FromArgb(16, 255, 255, 255), Color.FromArgb(46, 220, 120, 120), b.Hover);
-            border = Mix(Color.FromArgb(36, 255, 255, 255), Color.FromArgb(110, 220, 120, 120), b.Hover);
-            text = Color.FromArgb(230, 150, 150);
+            fill = Mix(Color.FromArgb(18, 255, 255, 255), Color.FromArgb(70, 220, 120, 120), b.Hover);
+            border = Mix(Color.FromArgb(40, 255, 255, 255), Color.FromArgb(150, 230, 130, 130), b.Hover);
+            text = Mix(Color.FromArgb(200, 150, 150), Color.FromArgb(255, 190, 190), b.Hover);
         }
         else
         {
-            fill = Mix(Color.FromArgb(16, 255, 255, 255), Color.FromArgb(34, 255, 255, 255), b.Hover);
-            border = Mix(Color.FromArgb(36, 255, 255, 255), Color.FromArgb(80, 255, 255, 255), b.Hover);
-            text = Color.FromArgb(220, 230, 240);
+            // 悬停对比拉大，之前 16→34 太细腻，看着像没反应
+            fill = Mix(Color.FromArgb(18, 255, 255, 255), Color.FromArgb(52, 255, 255, 255), b.Hover);
+            border = Mix(Color.FromArgb(40, 255, 255, 255), Color.FromArgb(120, 255, 255, 255), b.Hover);
+            text = Mix(Color.FromArgb(206, 218, 230), Color.FromArgb(255, 255, 255), b.Hover);
         }
-        if (!b.Enabled) { fill = Color.FromArgb(10, 255, 255, 255); text = Color.FromArgb(90, 100, 110); }
+        if (!b.Enabled)
+        {
+            fill = Color.FromArgb(10, 255, 255, 255);
+            border = Color.FromArgb(28, 255, 255, 255);
+            text = Color.FromArgb(96, 108, 120);
+        }
 
         using (GraphicsPath p = Round(r, 10))
         {
@@ -768,6 +799,22 @@ public class PadCenter : Form
             {
                 PadButton b = Buttons[hit];
                 if (b.Enabled && OnAction != null) { try { OnAction(b.Key); } catch { } }
+            }
+        }
+        else if (hit < 0)
+        {
+            PointF lp = ToDesign(e.Location);
+            if (!addrRect.IsEmpty && addrRect.Contains((int)lp.X, (int)lp.Y))
+            {
+                try
+                {
+                    if (Last != null)
+                        Clipboard.SetText("http://" + Last.LanIp + ":" + port + "/?k=" + ReadKey());
+                }
+                catch { }
+                toastAt = DateTime.Now;
+                frameDirty = true;
+                Invalidate();
             }
         }
         down = -1;
@@ -857,7 +904,10 @@ $ui.AddButton('startadmin', '以管理员启动',     222, 292, 190, 40, 0)
 $ui.AddButton('stop',       '停止服务',         424, 292, 190, 40, 2)
 $ui.AddButton('usb',        'USB 直连（建映射）', 20, 342, 190, 36, 0)
 $ui.AddButton('open',       '打开平板页面',     222, 342, 190, 36, 0)
-$ui.AddButton('copy',       '复制地址',         424, 342, 190, 36, 0)
+$ui.AddButton('help',       '使用说明',         424, 342, 190, 36, 0)
+$ui.AddButton('log',        '打开日志',          20, 386, 190, 36, 0)
+$ui.AddButton('refresh',    '刷新状态',         222, 386, 190, 36, 0)
+$ui.AddButton('copy',       '复制地址',         424, 386, 190, 36, 0)
 
 $ui.OnAction = [Func[string, bool]]{
     param($key)
@@ -892,6 +942,17 @@ $ui.OnAction = [Func[string, bool]]{
             $ip = if ($d) { $d.LanIp } else { '127.0.0.1' }
             [System.Windows.Forms.Clipboard]::SetText("http://$ip`:$port/?k=$(Get-Key)")
         }
+        'help' {
+            $f = Join-Path $here '使用说明.txt'
+            if (Test-Path $f) { Start-Process notepad.exe $f }
+            else { [System.Windows.Forms.MessageBox]::Show('没找到 使用说明.txt', 'PadTrack') }
+        }
+        'log' {
+            $f = Join-Path $here 'padtrack.log'
+            if (Test-Path $f) { Start-Process notepad.exe $f }
+            else { [System.Windows.Forms.MessageBox]::Show('还没生成日志（服务没启动过？）', 'PadTrack') }
+        }
+        'refresh' { }
     }
     $ui.PokeRefresh()
     return $true
