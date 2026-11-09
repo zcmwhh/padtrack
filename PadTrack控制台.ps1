@@ -32,12 +32,20 @@ using System.Drawing.Text;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+
+public class AddrItem
+{
+    public string Kind = "";      // 网线 / WiFi / 热点
+    public string Ip = "";
+    public string IfName = "";
+}
 
 public class StatusData
 {
@@ -50,6 +58,8 @@ public class StatusData
     public string LastClient = "";
     public string LanIp = "127.0.0.1";
     public string LogTail = "";
+    public System.Collections.Generic.List<AddrItem> Addrs =
+        new System.Collections.Generic.List<AddrItem>();
 }
 
 public class PadButton
@@ -86,6 +96,7 @@ public class PadCenter : Form
     private float scale = 1f, offX = 0f, offY = 0f;
 
     private Rectangle addrRect = Rectangle.Empty;
+    private string addrUrl = "";
     private DateTime toastAt = DateTime.MinValue;
 
     private Bitmap frameCache = null;
@@ -145,8 +156,8 @@ public class PadCenter : Form
         fLog = new Font("Microsoft YaHei UI", 8.2f);
         fTag = new Font("Microsoft YaHei UI", 8f);
 
-        cardA = new Rectangle(20, 92, 600, 176);
-        cardB = new Rectangle(20, 448, 600, 232);
+        cardA = new Rectangle(20, 92, 600, 232);
+        cardB = new Rectangle(20, 474, 600, 206);
 
         Caps.Add(MakeCap("min", 508, 14));
         Caps.Add(MakeCap("max", 548, 14));
@@ -302,9 +313,62 @@ public class PadCenter : Form
         return "127.0.0.1";
     }
 
+    private bool? hotspotOn = null;
+    private DateTime hotspotAt = DateTime.MinValue;
+
+    private bool HotspotOn()
+    {
+        // 移动热点靠 Internet 连接共享服务，服务停了地址就不通
+        if (hotspotOn != null && (DateTime.Now - hotspotAt).TotalSeconds < 10) return hotspotOn.Value;
+        hotspotAt = DateTime.Now;
+        bool on = false;
+        try
+        {
+            string outp = RunHidden(Path.Combine(Environment.SystemDirectory, "sc.exe"),
+                                    "query SharedAccess", 2000);
+            on = outp.IndexOf("RUNNING", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        catch { }
+        hotspotOn = on;
+        return on;
+    }
+
+    private void CollectAddrs(StatusData d)
+    {
+        try
+        {
+            foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+
+                string kind = "网卡";
+                string desc = (ni.Name + " " + ni.Description).ToLower();
+                if (desc.Contains("wlan") || desc.Contains("wi-fi") || desc.Contains("wireless"))
+                    kind = "WiFi";
+                else if (desc.Contains("以太网") || desc.Contains("ethernet"))
+                    kind = "网线";
+                if (ni.Name.Contains("本地连接") || ni.Description.Contains("Wi-Fi Direct"))
+                    kind = HotspotOn() ? "热点" : "热点(未开)";
+
+                foreach (UnicastIPAddressInformation ua in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    string ip = ua.Address.ToString();
+                    if (ip.StartsWith("127.") || ip.StartsWith("169.254.")) continue;
+                    AddrItem it = new AddrItem();
+                    it.Kind = kind; it.Ip = ip; it.IfName = ni.Name;
+                    d.Addrs.Add(it);
+                }
+            }
+        }
+        catch { }
+    }
+
     private StatusData Collect()
     {
         StatusData d = new StatusData();
+        CollectAddrs(d);
         d.LanIp = DetectLanIp();
 
         int pid = FindListenerPid();
@@ -394,9 +458,19 @@ public class PadCenter : Form
 
         string key = ReadKey();
         if (d.Device.Length > 0 && d.Reverse)
-            lines.Add("USB 地址|http://127.0.0.1:" + port + "/?k=" + key + "|ok");
-        else
-            lines.Add("WiFi 地址|http://" + d.LanIp + ":" + port + "/?k=" + key + "|dim");
+            lines.Add("USB|http://127.0.0.1:" + port + "/?k=" + key + "|ok");
+
+        int shown = 0;
+        foreach (AddrItem a in d.Addrs)
+        {
+            if (shown >= 2) break;
+            string label = a.Kind;
+            if (label == "网卡") label = a.IfName.Length > 0 ? a.IfName : "网卡";
+            lines.Add(label + "|http://" + a.Ip + ":" + port + "/?k=" + key + "|dim");
+            shown++;
+        }
+        if (shown == 0)
+            lines.Add("地址|http://" + d.LanIp + ":" + port + "/?k=" + key + "|dim");
 
         linesData = lines.ToArray();
         logData = d.LogTail;
@@ -607,10 +681,11 @@ public class PadCenter : Form
                 g.DrawString(label, fLine, b, cardA.X + 38, y);
             using (SolidBrush b = new SolidBrush(TextMain))
                 g.DrawString(value, fLineB, b, cardA.X + 150, y);
-            if (label == "USB 地址" || label == "WiFi 地址" || label == "平板地址")
+            if (value.StartsWith("http://"))
             {
                 SizeF sz = g.MeasureString(value, fLineB);
                 addrRect = new Rectangle(cardA.X + 146, (int)y - 2, (int)sz.Width + 8, (int)sz.Height + 4);
+                addrUrl = value;        // 点哪行复制哪行
             }
             y += 28;
         }
@@ -810,16 +885,7 @@ public class PadCenter : Form
             PointF lp = ToDesign(e.Location);
             if (!addrRect.IsEmpty && addrRect.Contains((int)lp.X, (int)lp.Y))
             {
-                try
-                {
-                    if (Last != null)
-                    {
-                        bool usb = Last.Device.Length > 0 && Last.Reverse;
-                        string host = usb ? "127.0.0.1" : Last.LanIp;
-                        Clipboard.SetText("http://" + host + ":" + port + "/?k=" + ReadKey());
-                    }
-                }
-                catch { }
+                try { if (addrUrl.Length > 0) Clipboard.SetText(addrUrl); } catch { }
                 toastAt = DateTime.Now;
                 frameDirty = true;
                 Invalidate();
@@ -907,14 +973,14 @@ function Get-Key {
 
 $ui = New-Object PadCenter
 $ui.AppDir = $here
-$ui.AddButton('startadmin', '启动（管理员权限）', 20,  292, 290, 40, 1)
-$ui.AddButton('stop',       '停止服务',           320, 292, 290, 40, 2)
-$ui.AddButton('usb',        'USB 直连（建映射）', 20, 342, 190, 36, 0)
-$ui.AddButton('open',       '打开平板页面',     222, 342, 190, 36, 0)
-$ui.AddButton('help',       '使用说明',         424, 342, 190, 36, 0)
-$ui.AddButton('log',        '打开日志',          20, 386, 190, 36, 0)
-$ui.AddButton('refresh',    '刷新状态',         222, 386, 190, 36, 0)
-$ui.AddButton('copy',       '复制地址',         424, 386, 190, 36, 0)
+$ui.AddButton('startadmin', '启动（管理员权限）', 20,  334, 290, 38, 1)
+$ui.AddButton('stop',       '停止服务',           320, 334, 290, 38, 2)
+$ui.AddButton('usb',        'USB 直连（建映射）', 20, 380, 190, 34, 0)
+$ui.AddButton('open',       '打开平板页面',     222, 380, 190, 34, 0)
+$ui.AddButton('help',       '使用说明',         424, 380, 190, 34, 0)
+$ui.AddButton('log',        '打开日志',          20, 420, 190, 34, 0)
+$ui.AddButton('refresh',    '刷新状态',         222, 420, 190, 34, 0)
+$ui.AddButton('copy',       '复制地址',         424, 420, 190, 34, 0)
 
 # 本程序拉起来的进程（记事本等），停止服务时一起关掉
 $script:spawned = @()
