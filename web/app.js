@@ -1473,6 +1473,14 @@
 
   // ---- Caps 指示灯（由服务端 /keylock 同步）----
   let capsOn = false;
+  let capsStamp = 0;          // 最近一次本地切换的时间，用来挡住过期的服务端结果
+
+  function toggleCaps() {
+    capsOn = !capsOn;
+    capsStamp = performance.now();
+    paintCaps();
+    if (navigator.vibrate) navigator.vibrate(10);
+  }
 
   function paintCaps() {
     document.querySelectorAll('.kbkey.capskey').forEach((b) => {
@@ -1484,7 +1492,9 @@
     try {
       const r = await fetch(`/keylock?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       const d = await r.json();
-      if (typeof d.caps === 'boolean' && d.caps !== capsOn) {
+      // 刚点过的 1.5 秒内不采纳，避免服务端还没反应过来就把灯改回去
+      if (typeof d.caps === 'boolean' && d.caps !== capsOn &&
+          performance.now() - capsStamp > 1500) {
         capsOn = d.caps;
         paintCaps();
       }
@@ -1502,6 +1512,9 @@
       flash('Fn 键无对应功能');
       return;
     }
+    // Caps：按下立刻切换指示灯（不等服务端），同时照常发键给电脑
+    if (vk === 0x14) toggleCaps();
+
     // 左 Shift：双击锁定 / 再点解锁
     if (vk === 0x10 && btn && btn.classList.contains('shiftl')) {
       const now = performance.now();
