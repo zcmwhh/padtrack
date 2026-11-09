@@ -2371,6 +2371,18 @@
   // 注意：不要再遍历 [data-vk] 绑 click —— 键盘按键是动态生成的，
   // 那样会和 buildKeys 里的处理叠加，导致一次点击发出两次按键。
 
+  // 兜底：除了手动输入框，任何地方出现选区都立刻清掉。
+  // 安卓上只要选区存在，长按就会弹「复制 / 分享 / 全选」那条浮动工具条。
+  const clearStraySelection = () => {
+    const sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const ta = document.getElementById('ta');
+    const anchorNode = sel.anchorNode;
+    if (ta && anchorNode && (ta === anchorNode || ta.contains(anchorNode))) return;
+    try { sel.removeAllRanges(); } catch (_) {}
+  };
+  document.addEventListener('selectionchange', clearStraySelection);
+
   // 长按不应弹任何浏览器菜单（安卓 Chrome 对 <img> 会弹「保存图片」）
   // 用捕获阶段，确保在元素自己的处理之前就拦下来
   document.addEventListener('contextmenu', (e) => {
