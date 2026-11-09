@@ -1189,6 +1189,7 @@
         accX += e.clientX - lastCX;
         accY += e.clientY - lastCY;
         lastCX = e.clientX; lastCY = e.clientY;
+        flushMove(false);                  // 不等下一帧，立刻发
       }
     } else if (pts.size === 2 && mode === 'scroll2') {
       const arr = [...pts.values()];
@@ -1248,6 +1249,7 @@
   function endPointer(e) {
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
+    flushMove(true);                       // 抬手前把剩下的位移发完，别丢尾巴
     const now = performance.now();
 
     if (pts.size === 0) {
@@ -1319,6 +1321,40 @@
       }, { passive: false, capture: true });
     });
 
+  /* ---------------- 发送位移 ---------------- */
+
+  // 上次发送位移的时间：限流用，最多 125Hz（约 8ms 一次）
+  let lastMoveAt = 0;
+
+  /**
+   * 把攒下的位移发出去。
+   * @param {boolean} force true 时不受 8ms 限流约束（抬手、切模式时用）
+   */
+  function flushMove(force) {
+    if (mode !== 'move' && mode !== 'drag') { accX = 0; accY = 0; return; }
+    if (!accX && !accY) return;
+    const now = performance.now();
+    if (!force && now - lastMoveAt < 8) return;
+    lastMoveAt = now;
+
+    let dx = accX, dy = accY;
+    accX = 0; accY = 0;
+    let f = S.sens;
+    const sp0 = Math.hypot(dx, dy);
+    if (S.accel) {
+      // 单帧位移封顶：WiFi 抖动或掉帧时 delta 会异常大，
+      // 不封顶的话加速度会把它再放大一次，看起来就是"突然冲出去"
+      const sp = Math.min(sp0, 40);
+      f *= 0.62 + Math.min(sp / 26, 1) * 0.9;
+    }
+    // 拖动时慢速精调：手指慢慢挪（调滑块、选文字）时再压一档，
+    // 快拖的时候不动它，保证拉窗口还是利索的
+    if (mode === 'drag' && sp0 < 8) f *= 0.8;
+    remX += dx * f; remY += dy * f;
+    const ix = Math.trunc(remX), iy = Math.trunc(remY);
+    if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
+  }
+
   /* ---------------- 每帧发送 ---------------- */
   function tick() {
     // 全屏键盘上的滑动：移动光标
@@ -1340,26 +1376,7 @@
       }
     }
 
-    if (mode === 'move' || mode === 'drag') {
-      let dx = accX, dy = accY;
-      accX = 0; accY = 0;
-      let f = S.sens;
-      const sp0 = Math.hypot(dx, dy);
-      if (S.accel) {
-        // 单帧位移封顶：WiFi 抖动或掉帧时 delta 会异常大，
-        // 不封顶的话加速度会把它再放大一次，看起来就是"突然冲出去"
-        const sp = Math.min(sp0, 40);
-        f *= 0.62 + Math.min(sp / 26, 1) * 0.9;
-      }
-      // 拖动时慢速精调：手指慢慢挪（调滑块、选文字）时再压一档，
-      // 快拖的时候不动它，保证拉窗口还是利索的
-      if (mode === 'drag' && sp0 < 8) f *= 0.8;
-      remX += dx * f; remY += dy * f;
-      const ix = Math.trunc(remX), iy = Math.trunc(remY);
-      if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
-    } else {
-      accX = 0; accY = 0;
-    }
+    flushMove(false);
 
     if (mode === 'scroll2') {
       if (pinch) {
