@@ -739,12 +739,15 @@
 
   /* 全屏键盘顶部的触控条 */
   #kfStrip {
-    height: 62px; margin-bottom: 8px; border-radius: 12px;
+    /* 三指要能同时落在条里：太矮的话第三根手指经常落到键盘上，手势就失效了 */
+    height: 90px; margin-bottom: 8px; border-radius: 12px;
     border: 1px solid rgba(120, 150, 180, .22);
     background: radial-gradient(420px 120px at 50% 50%, #16212c 0%, #0e151d 70%);
     display: flex; align-items: center; justify-content: center;
-    color: #5d6b7a; font-size: 12px; touch-action: none;
+    padding: 8px 16px; text-align: center; line-height: 1.5;
+    color: #5d6b7a; font-size: 12.5px; touch-action: none;
   }
+  #kfStrip b { color: #7d8d9d; font-weight: 500; }
 
   /* 分屏：键盘为主 + 小触控板 */
   #splitmode {
