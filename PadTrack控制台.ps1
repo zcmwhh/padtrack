@@ -532,6 +532,14 @@ public class PadCenter : Form
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Windows.Forms, System.Drawing
 if ($Compile) { 'compiled ok'; exit 0 }
 
+# adb 在某些机器上写 %TEMP% 会没权限，统一指到本地 tools\tmp
+try {
+    $tmpDir = Join-Path $here 'tools\tmp'
+    if (-not (Test-Path $tmpDir)) { New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null }
+    $env:TMP = $tmpDir
+    $env:TEMP = $tmpDir
+} catch {}
+
 function Get-Key {
     if (Test-Path $keyFile) { return (Get-Content $keyFile -Raw).Trim() }
     return ''
@@ -572,24 +580,54 @@ function Test-NewVersion {
     } catch { return $false }
 }
 
-function Get-AdbDevice {
-    if (-not (Test-Path $adb)) { return $null }
-    $env:TMP = Join-Path $here 'tools\tmp'
-    $env:TEMP = $env:TMP
-    $out = & $adb devices 2>$null
-    foreach ($line in $out) {
-        if ($line -match '^(\S+)\s+device$') { return $Matches[1] }
+# adb 是控制台程序，每次用 & 直接调用都会闪一下黑框。
+# 这里改成隐藏窗口 + 重定向输出，并且缓存 8 秒，避免 2 秒刷一次。
+$script:adbCache = @{ at = [datetime]::MinValue; dev = $null; rev = '' }
+
+function Invoke-Adb {
+    param([string[]]$Arguments)
+    if (-not (Test-Path $adb)) { return @() }
+    $tag = [guid]::NewGuid().ToString('N')
+    $outFile = Join-Path $env:TEMP ($tag + '.out')
+    $errFile = Join-Path $env:TEMP ($tag + '.err')
+    try {
+        Start-Process -FilePath $adb -ArgumentList $Arguments -WindowStyle Hidden `
+            -RedirectStandardOutput $outFile -RedirectStandardError $errFile -Wait -PassThru | Out-Null
+        if (Test-Path $outFile) { return @(Get-Content $outFile -ErrorAction SilentlyContinue) }
+        return @()
+    } catch {
+        return @()
+    } finally {
+        Remove-Item $outFile, $errFile -Force -ErrorAction SilentlyContinue
     }
-    return $null
+}
+
+function Get-AdbInfo {
+    $now = Get-Date
+    if (($now - $script:adbCache.at).TotalSeconds -lt 8) { return $script:adbCache }
+
+    $dev = $null
+    foreach ($line in (Invoke-Adb @('devices'))) {
+        if ($line -match '^(\S+)\s+device$') { $dev = $Matches[1] }
+    }
+
+    $rev = ''
+    if ($dev) {
+        foreach ($line in (Invoke-Adb @('reverse', '--list'))) {
+            if ($line -match "tcp:$port") { $rev = 'on' }
+        }
+    }
+
+    $script:adbCache = @{ at = $now; dev = $dev; rev = $rev }
+    return $script:adbCache
+}
+
+function Get-AdbDevice {
+    return (Get-AdbInfo).dev
 }
 
 function Get-Reverse {
-    if (-not (Test-Path $adb)) { return '' }
-    $env:TMP = Join-Path $here 'tools\tmp'
-    $env:TEMP = $env:TMP
-    $out = & $adb reverse --list 2>$null
-    if ($out -match "tcp:$port") { return 'on' }
-    return ''
+    return (Get-AdbInfo).rev
 }
 
 function Get-LastClient {
