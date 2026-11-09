@@ -392,7 +392,11 @@ public class PadCenter : Form
         else
             lines.Add("最近连接|-|dim");
 
-        lines.Add("平板地址|http://" + d.LanIp + ":" + port + "/?k=" + ReadKey() + "|dim");
+        string key = ReadKey();
+        if (d.Device.Length > 0 && d.Reverse)
+            lines.Add("USB 地址|http://127.0.0.1:" + port + "/?k=" + key + "|ok");
+        else
+            lines.Add("WiFi 地址|http://" + d.LanIp + ":" + port + "/?k=" + key + "|dim");
 
         linesData = lines.ToArray();
         logData = d.LogTail;
@@ -603,7 +607,7 @@ public class PadCenter : Form
                 g.DrawString(label, fLine, b, cardA.X + 38, y);
             using (SolidBrush b = new SolidBrush(TextMain))
                 g.DrawString(value, fLineB, b, cardA.X + 150, y);
-            if (label == "平板地址")
+            if (label == "USB 地址" || label == "WiFi 地址" || label == "平板地址")
             {
                 SizeF sz = g.MeasureString(value, fLineB);
                 addrRect = new Rectangle(cardA.X + 146, (int)y - 2, (int)sz.Width + 8, (int)sz.Height + 4);
@@ -809,7 +813,11 @@ public class PadCenter : Form
                 try
                 {
                     if (Last != null)
-                        Clipboard.SetText("http://" + Last.LanIp + ":" + port + "/?k=" + ReadKey());
+                    {
+                        bool usb = Last.Device.Length > 0 && Last.Reverse;
+                        string host = usb ? "127.0.0.1" : Last.LanIp;
+                        Clipboard.SetText("http://" + host + ":" + port + "/?k=" + ReadKey());
+                    }
                 }
                 catch { }
                 toastAt = DateTime.Now;
@@ -964,10 +972,13 @@ $ui.OnAction = [Func[string, bool]]{
         }
         'open' {
             $k = Get-Key
-            Start-Process "http://127.0.0.1:$port/?k=$k"
+            $usb = ($d -and $d.Device -and $d.Reverse)
+            $hostPart = if ($usb) { '127.0.0.1' } elseif ($d) { $d.LanIp } else { '127.0.0.1' }
+            Start-Process "http://$hostPart`:$port/?k=$k"
         }
         'copy' {
-            $ip = if ($d) { $d.LanIp } else { '127.0.0.1' }
+            $usb = ($d -and $d.Device -and $d.Reverse)
+            $ip = if ($usb) { '127.0.0.1' } elseif ($d) { $d.LanIp } else { '127.0.0.1' }
             [System.Windows.Forms.Clipboard]::SetText("http://$ip`:$port/?k=$(Get-Key)")
         }
         'help' {
