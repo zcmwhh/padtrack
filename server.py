@@ -1809,6 +1809,29 @@ def find_existing(port=None, tries=None):
     return running_port
 
 
+def launch_center():
+    """打开控制中心。快捷方式指向 PadTrack.exe --center，图标取自 exe 内嵌。"""
+    ps1 = os.path.join(HERE, "PadTrack控制台.ps1")
+    if not os.path.exists(ps1):
+        msg = ("找不到控制中心脚本:\n" + ps1 +
+               "\n\n请确认 PadTrack控制台.ps1 和 PadTrack.exe 在同一个文件夹里。")
+        print(msg)
+        msgbox(msg)
+        return 1
+    try:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-WindowStyle", "Hidden", "-File", ps1],
+            cwd=HERE,
+            creationflags=0x08000000,   # CREATE_NO_WINDOW，绝不闪黑框
+            close_fds=True,
+        )
+        return 0
+    except Exception as exc:
+        msgbox("启动控制中心失败:\n" + str(exc))
+        return 1
+
+
 def main():
     global KEY
     hidden = use_hidden_output()
@@ -1817,7 +1840,12 @@ def main():
     ap.add_argument("--port", type=int, default=8765, help="监听端口，默认 8765")
     ap.add_argument("--bind", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
     ap.add_argument("--key", default=None, help="访问码，默认沿用上次生成的值")
+    ap.add_argument("--center", action="store_true",
+                    help="打开控制中心（不启动服务）")
     args = ap.parse_args()
+
+    if args.center:
+        return launch_center()
 
     KEY = resolve_key(args.key)
 
