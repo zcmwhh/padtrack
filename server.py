@@ -1648,6 +1648,56 @@ def _tasklist_has(pid):
         return False
 
 
+def port_listening(port):
+    """本机这个端口有没有人在听。"""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.4):
+            return True
+    except OSError:
+        return False
+
+
+def process_integrity(pid):
+    """返回进程的完整性级别：'high' / 'medium' / None(判断不了)。"""
+    try:
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        h = k32.OpenProcess(0x1000, False, int(pid))
+        if not h:
+            return None
+        try:
+            tok = wintypes.HANDLE()
+            if not adv.OpenProcessToken(h, 0x0008, ctypes.byref(tok)):
+                return None
+            try:
+                need = wintypes.DWORD(0)
+                adv.GetTokenInformation(tok, 25, None, 0, ctypes.byref(need))
+                buf = ctypes.create_string_buffer(need.value)
+                if not adv.GetTokenInformation(tok, 25, buf, need, ctypes.byref(need)):
+                    return None
+                sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+                out = ctypes.c_wchar_p()
+                if not adv.ConvertSidToStringSidW(sid, ctypes.byref(out)):
+                    return None
+                rid = out.value.rsplit("-", 1)[-1]
+                return {"12288": "high", "16384": "high"}.get(rid, "medium")
+            finally:
+                k32.CloseHandle(tok)
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return None
+
+
+def read_pid():
+    try:
+        with open(PID_PATH, encoding="utf-8") as f:
+            return int(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
 def find_existing(port=None, tries=None):
     """已经跑着一个 PadTrack 就返回它的端口，否则 None。
 
@@ -1661,9 +1711,18 @@ def find_existing(port=None, tries=None):
     except (OSError, ValueError, IndexError):
         return None
 
-    if pid_alive(pid) or _tasklist_has(pid):
-        return running_port
-    return None
+    # 进程活着还不够，端口要真的在听——否则是陈旧 pid（PID 被复用/进程卡死），
+    # 继续挡着新实例的话，用户那边就是"连不上"
+    if not (pid_alive(pid) or _tasklist_has(pid)):
+        return None
+    if not port_listening(running_port):
+        log(f"pid {pid} 还活着但端口 {running_port} 没在听，按陈旧记录处理")
+        try:
+            os.remove(PID_PATH)
+        except OSError:
+            pass
+        return None
+    return running_port
 
 
 def main():
@@ -1688,10 +1747,35 @@ def main():
     # 单实例：已经有 PadTrack 在跑就不再起第二个（否则每点一次就多一个）
     existing = find_existing(args.port)
     if existing is not None:
+        old_pid = read_pid()
+        old_il = process_integrity(old_pid) if old_pid else None
+        # 这次是以管理员启动、旧实例却是普通权限：必须接管，
+        # 否则老实例会一直挡着，用户以为"管理员启动没用"
+        if is_admin() and old_il == "medium":
+            log(f"接管：结束普通权限的旧实例 pid={old_pid}")
+            try:
+                subprocess.run(["taskkill", "/F", "/PID", str(old_pid)],
+                               capture_output=True, timeout=8,
+                               creationflags=0x08000000)
+            except Exception:
+                pass
+            time.sleep(0.5)
+            try:
+                os.remove(PID_PATH)
+            except OSError:
+                pass
+            existing = None
+
+    if existing is not None:
         ips = lan_ips() or ["<本机IP>"]
         write_address(existing, ips)
-        print(f"PadTrack 已经在运行（端口 {existing}），没有重复启动。"
-              f"\n地址见: {ADDR_PATH}", flush=True)
+        msg = (f"PadTrack 已经在运行（端口 {existing}）。\n\n"
+               f"平板打开:  http://{ips[0]}:{existing}/?k={KEY}\n\n"
+               f"如果这个实例是普通权限、而你要操作管理员程序，\n"
+               f"请先双击【停止.bat】，再双击【管理员启动.bat】。")
+        print(msg, flush=True)
+        if hidden:
+            msgbox(msg)
         return 0
 
     try:
