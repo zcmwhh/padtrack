@@ -798,6 +798,7 @@
       '\nstatus=' + (lyricPlaying ? 'playing' : 'paused') +
       '  lines=' + lyricLines.length +
       '\n卡帧=' + frameGapBad + ' 次  最长=' + frameGapMax + 'ms' +
+      '\n采样=' + evtRate + '/s  发送=' + msgRate + '/s' +
       '\n' + (lyricSongKey || '-');
   }, 250);
 
@@ -1177,6 +1178,7 @@
   function onPointerMove(e) {
     const p = pts.get(e.pointerId);
     if (!p) return;
+    evtCount++;
     p.x = e.clientX; p.y = e.clientY;
 
     if (pts.size === 1) {
@@ -1343,8 +1345,11 @@
 
   /* ---------------- 发送位移 ---------------- */
 
-  // 上次发送位移的时间：限流用，最多 125Hz（约 8ms 一次）
+  // 上次发送位移的时间：限流用（4ms 门限 ≈ 250Hz 上限）
   let lastMoveAt = 0;
+  // 诊断：每秒收到多少采样、发出多少移动指令
+  let evtCount = 0, msgCount = 0, evtRate = 0, msgRate = 0;
+  setInterval(() => { evtRate = evtCount; msgRate = msgCount; evtCount = 0; msgCount = 0; }, 1000);
 
   /**
    * 把攒下的位移发出去。
@@ -1354,7 +1359,8 @@
     if (mode !== 'move' && mode !== 'drag') { accX = 0; accY = 0; return; }
     if (!accX && !accY) return;
     const now = performance.now();
-    if (!force && now - lastMoveAt < 8) return;
+    // 4ms 门限（≈250Hz）：触屏采样率高的时候别让它成为瓶颈
+    if (!force && now - lastMoveAt < 4) return;
     lastMoveAt = now;
 
     let dx = accX, dy = accY;
@@ -1372,7 +1378,7 @@
     if (mode === 'drag' && sp0 < 8) f *= 0.8;
     remX += dx * f; remY += dy * f;
     const ix = Math.trunc(remX), iy = Math.trunc(remY);
-    if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
+    if (ix || iy) { remX -= ix; remY -= iy; msgCount++; send({ t: 'm', dx: ix, dy: iy }); }
   }
 
   /* ---------------- 每帧发送 ---------------- */
