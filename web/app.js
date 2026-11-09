@@ -829,14 +829,46 @@
   const diagBtn = document.getElementById('diagBtn');
   if (diagBtn) diagBtn.addEventListener('click', (e) => { e.stopPropagation(); runDiag(); });
 
-  // 打开页面时先看看跑在什么权限下
-  (async () => {
+  // 显示当前权限 + 前台程序是不是管理员（点不动时能直接看出来）
+  const fgVal = document.getElementById('fgVal');
+  async function refreshDiagInfo() {
     try {
       const r = await fetch(`/diag?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       const d = await r.json();
       if (diagVal) diagVal.textContent = d.admin ? '管理员' : '普通';
+      if (fgVal) {
+        const fg = d.foreground;
+        if (!fg) { fgVal.textContent = '—'; fgVal.classList.remove('on'); }
+        else {
+          fgVal.textContent = (fg.elevated ? '⚠ ' : '') +
+            (fg.title ? fg.title.slice(0, 12) : '(无标题)') +
+            (fg.elevated ? '（管理员）' : '');
+          fgVal.classList.toggle('on', !!fg.elevated && !d.admin);
+        }
+      }
     } catch (_) {}
-  })();
+  }
+  refreshDiagInfo();
+  setInterval(refreshDiagInfo, 4000);
+
+  // 以管理员重启：前台是管理员程序、我们又没权限时，一键提权
+  const elevBtn = document.getElementById('elevBtn');
+  if (elevBtn) {
+    elevBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      elevBtn.disabled = true;
+      try {
+        const r = await fetch(`/elevate?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+        const d = await r.json();
+        if (d.already) flash('已经是管理员权限了');
+        else if (d.ok) flash('正在提权：请到电脑上点「是」，然后重新连接');
+        else flash('提权失败：' + (d.reason || '未知'));
+      } catch (err) {
+        flash('提权请求失败：' + (err && err.message));
+      }
+      setTimeout(() => { elevBtn.disabled = false; }, 3000);
+    });
+  }
 
   // 把当前偏移显示出来（设置面板 + 左上角角标）
   const lyrOffVal = document.getElementById('lyrOffVal');

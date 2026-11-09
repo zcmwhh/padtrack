@@ -871,6 +871,46 @@ def inject_test():
     return result
 
 
+def foreground_info():
+    """当前前台窗口是谁、是不是管理员权限。"""
+    try:
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        n = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        il = process_integrity(pid.value)
+        return {"title": buf.value[:60], "pid": int(pid.value),
+                "elevated": il == "high"}
+    except Exception:
+        return None
+
+
+def launch_elevated():
+    """用管理员权限重新启动自己（会弹 UAC，需要用户在电脑上点“是”）。"""
+    if is_admin():
+        return {"ok": True, "already": True}
+    try:
+        if getattr(sys, "frozen", False):
+            exe, params = sys.executable, ""
+        else:
+            exe = sys.executable
+            params = f'"{os.path.abspath(__file__)}"'
+        work = HERE
+        # ShellExecuteW 返回 >32 才算成功；UAC 被取消时是 1223
+        r = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", exe, params or None, work, 1)
+        if r <= 32:
+            return {"ok": False, "code": int(r),
+                    "reason": "UAC 被取消" if r == 1223 else f"启动失败({r})"}
+        return {"ok": True, "launched": True}
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)}
+
+
 def speaker_volume():
     """读系统主音量。返回 (0~1 的音量, 是否静音)；拿不到返回 (None, None)。"""
     _ensure_com()
@@ -1286,6 +1326,15 @@ class Handler(socketserver.BaseRequestHandler):
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
 
+            if method == "GET" and path == "/elevate":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(launch_elevated(), ensure_ascii=False)
+                self._http(sock, 200, body.encode("utf-8"),
+                           "application/json; charset=utf-8")
+                return
+
             if method == "GET" and path in ("/diag", "/inject"):
                 if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
@@ -1293,7 +1342,8 @@ class Handler(socketserver.BaseRequestHandler):
                 if path == "/inject":
                     body = json.dumps(inject_test(), ensure_ascii=False)
                 else:
-                    body = json.dumps({"admin": is_admin(), "cursor": cursor_pos()},
+                    body = json.dumps({"admin": is_admin(), "cursor": cursor_pos(),
+                                       "foreground": foreground_info()},
                                       ensure_ascii=False)
                 self._http(sock, 200, body.encode("utf-8"),
                            "application/json; charset=utf-8")
@@ -1662,7 +1712,19 @@ def process_integrity(pid):
     try:
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         k32.OpenProcess.restype = wintypes.HANDLE
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        adv.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD,
+                                         ctypes.POINTER(wintypes.HANDLE))
+        adv.OpenProcessToken.restype = wintypes.BOOL
+        adv.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int,
+                                            ctypes.c_void_p, wintypes.DWORD,
+                                            ctypes.POINTER(wintypes.DWORD))
+        adv.GetTokenInformation.restype = wintypes.BOOL
+        adv.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p,
+                                               ctypes.POINTER(ctypes.c_wchar_p))
+        adv.ConvertSidToStringSidW.restype = wintypes.BOOL
         h = k32.OpenProcess(0x1000, False, int(pid))
         if not h:
             return None
