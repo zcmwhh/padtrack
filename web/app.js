@@ -1688,7 +1688,6 @@
     // 右 Shift：点一下 = 输入法中英文切换（不进粘滞修饰键列表）
     if (vk === 0x10 && btn && btn.classList.contains('shiftr')) {
       send({ t: 'ime' });
-      setTimeout(syncIme, 260);
       flash('中 / 英');
       btn.classList.add('hit');
       setTimeout(() => btn.classList.remove('hit'), 110);
@@ -1740,15 +1739,9 @@
           b.appendChild(led);
           b.classList.toggle('capson', capsOn);
         }
-        // 右 Shift 单独标记：点一下切换输入法中英文，并在键上显示中/英
+        // 右 Shift 单独标记：点一下切换输入法中英文
         if (key.vk === 0x10 && b.classList.contains('mod')
-            && !b.classList.contains('shiftl')) {
-          b.classList.add('shiftr');
-          const badge = document.createElement('span');
-          badge.className = 'imeBadge';
-          badge.textContent = imeChinese ? '中' : '英';
-          b.appendChild(badge);
-        }
+            && !b.classList.contains('shiftl')) b.classList.add('shiftr');
         b.dataset.vk = key.vk;
         if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
         r.appendChild(b);
@@ -1756,31 +1749,6 @@
       container.appendChild(r);
     });
   }
-
-  // 输入法中/英状态：右 Shift 上显示「中」或「英」
-  let imeChinese = false;
-
-  function paintImeBadge() {
-    document.querySelectorAll('.imeBadge').forEach((el) => {
-      el.textContent = imeChinese ? '中' : '英';
-      el.classList.toggle('cn', imeChinese);
-    });
-  }
-
-  let imeBusy = false;
-  async function syncIme() {
-    if (imeBusy) return;
-    if (currentKbMode() === 'pad') return;
-    imeBusy = true;
-    try {
-      const r = await fetch(`/imestate?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
-      const d = await r.json();
-      const cn = !!d.chinese;
-      if (cn !== imeChinese) { imeChinese = cn; paintImeBadge(); }
-    } catch (_) {}
-    imeBusy = false;
-  }
-  setInterval(syncIme, 2000);
 
   function renderAll() {
     renderKeys(kbPad, true);

@@ -1037,19 +1037,3 @@ html.glass-light {
   -webkit-backdrop-filter: blur(26px) saturate(180%);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);
 }
-
-  /* 右 Shift 上的输入法状态徽标：中 / 英 */
-  .kbkey { position: relative; }
-  .kbkey .imeBadge {
-    position: absolute; top: 5px; right: 6px;
-    font-size: 9px; line-height: 1; padding: 2px 4px;
-    border-radius: 5px;
-    background: rgba(255, 255, 255, .10);
-    color: #9fb0c2;
-    pointer-events: none;
-    letter-spacing: 0;
-  }
-  .kbkey .imeBadge.cn {
-    background: rgba(62, 207, 142, .22);
-    color: #3ecf8e;
-  }
