@@ -189,7 +189,10 @@ html.glass-light {
   #island.exp .isle-full { opacity: 1; transform: none; }
 
   .isle-cover {
-    width: 30px; height: 30px; border-radius: 9px; object-fit: cover;
+    width: 30px; height: 30px; border-radius: 9px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     background: #1c2632; flex: none;
     transition: transform var(--t-slow) var(--ease-spring), border-radius var(--t-mid) var(--ease-spring);
   }
@@ -431,7 +434,9 @@ html.glass-light {
   .bgimg {
     position: absolute; inset: -12%;
     width: 124%; height: 124%;
-    object-fit: cover;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     filter: blur(90px) saturate(1.7) brightness(.9);
     transform: scale(1.1) translateZ(0);   /* 独立合成层：模糊结果缓存在 GPU 上 */
     backface-visibility: hidden;
@@ -871,17 +876,19 @@ html.glass-light {
   }
   html.art-on .artbg { opacity: 1; }
   /* 两层图片交叉淡入，和主页 #bgCover 一个套路 */
-  .artbg > img {
+  .artbg > i {
     position: absolute; inset: -12%;
     width: 124%; height: 124%;
-    object-fit: cover;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     filter: blur(90px) saturate(1.7) brightness(.9);
     transform: scale(1.1) translateZ(0);
     opacity: 0;
     transition: opacity 1.4s var(--ease-out);
     will-change: opacity;
   }
-  .artbg > img.on { opacity: 1; }
+  .artbg > i.on { opacity: 1; }
   /* 压暗，保证键帽和文字清晰 */
   .artbg::after {
     content: ''; position: absolute; inset: 0;

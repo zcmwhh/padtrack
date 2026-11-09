@@ -322,10 +322,8 @@
 
   // 键盘（全屏/分屏/环绕）的背景层：每个 .artbg 里放两层图片交叉淡入
   const artHosts = [...document.querySelectorAll('.artbg')].map((host) => {
-    const a = document.createElement('img');
-    const b = document.createElement('img');
-    a.alt = '';
-    b.alt = '';
+    const a = document.createElement('i');
+    const b = document.createElement('i');
     host.prepend(a, b);             // 放在压暗层下面
     return { imgs: [a, b], front: 0, url: '' };
   });
@@ -338,7 +336,7 @@
       const [x, y] = st.imgs;
       if (!want) {
         x.classList.remove('on'); y.classList.remove('on');
-        x.removeAttribute('src'); y.removeAttribute('src');
+        x.style.backgroundImage = ''; y.style.backgroundImage = '';
         return;
       }
       const back = st.imgs[1 - st.front];
@@ -347,9 +345,17 @@
         st.imgs[st.front].classList.remove('on');
         st.front = 1 - st.front;
       };
-      back.src = want;
-      if (back.complete && back.naturalWidth) swap();
-      else back.onload = () => { back.onload = null; swap(); };
+      // 用背景图，先预加载再切换，避免闪白
+      const probe = new Image();
+      probe.onload = () => {
+        back.style.backgroundImage = `url("${want}")`;
+        swap();
+      };
+      probe.onerror = () => {
+        back.style.backgroundImage = `url("${want}")`;
+        swap();
+      };
+      probe.src = want;
     });
   }
 
@@ -374,7 +380,7 @@
     }
     const front = bgLayers[bgFront];
     const back = bgLayers[1 - bgFront];
-    if (front.getAttribute('src') === bgUrl) { applyBgCover(); return; }
+    if (front.dataset.url === bgUrl) { applyBgCover(); return; }
 
     const swap = () => {
       back.classList.add('on');
@@ -382,9 +388,14 @@
       bgFront = 1 - bgFront;
       applyBgCover();
     };
-    back.src = bgUrl;
-    if (back.complete && back.naturalWidth) swap();
-    else back.onload = () => { back.onload = null; swap(); };
+    back.dataset.url = bgUrl;
+    const probe = new Image();
+    probe.onload = () => {
+      back.style.backgroundImage = `url("${bgUrl}")`;
+      swap();
+    };
+    probe.onerror = () => swap();
+    probe.src = bgUrl;
   }
 
   function paintLyric(force) {
@@ -469,8 +480,10 @@
         lyricPlaying = false;
         applyLyricToggles();
         musicCover.classList.remove('on');
-        musicCover.removeAttribute('src');
-        musicCoverBig.removeAttribute('src');
+        musicCover.dataset.url = '';
+        musicCoverBig.dataset.url = '';
+        musicCover.style.backgroundImage = '';
+        musicCoverBig.style.backgroundImage = '';
         setBgCover('');
         return;
       }
@@ -493,9 +506,12 @@
         ? `/cover?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(d.cover)}`
         : '';
       if (coverUrl) {
-        if (musicCover.getAttribute('src') !== coverUrl) {
-          musicCover.src = coverUrl;
-          musicCoverBig.src = coverUrl;
+        if (musicCover.dataset.url !== coverUrl) {
+          const bg = `url("${coverUrl}")`;
+          musicCover.dataset.url = coverUrl;
+          musicCoverBig.dataset.url = coverUrl;
+          musicCover.style.backgroundImage = bg;
+          musicCoverBig.style.backgroundImage = bg;
           setBgCover(coverUrl);
         }
       } else {
