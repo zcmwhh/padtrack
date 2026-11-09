@@ -684,7 +684,8 @@
   .kbkey {
     flex: 1 1 0; min-width: 0; height: 44px;
     border-radius: 9px; font-size: 15px;
-    background: #1b242e; color: #c7d5e3;
+    /* 半透明，让键盘背景那层封面图透上来 */
+    background: rgba(27, 36, 46, .42); color: #cfdcea;
     border: 1px solid rgba(120, 150, 180, .2);
     display: grid; place-items: center;
     -webkit-user-select: none; user-select: none;
