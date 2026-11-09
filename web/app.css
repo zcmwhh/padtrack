@@ -6,7 +6,32 @@
   /* 全屏时浏览器给元素留的边也上色，避免出现黑条 */
   :fullscreen { background: #0d1117 !important; }
   body:fullscreen { width: 100vw; height: 100vh; background: #0d1117 !important; }
-  :fullscreen::backdrop { background: #0d1117 !important; }
+  :root {
+  /* 毛玻璃基调：默认黑色玻璃 */
+  --glass-top: rgba(16, 20, 26, .62);
+  --glass-bot: rgba(10, 13, 18, .5);
+  --glass-solid: rgba(14, 18, 24, .55);
+  --glass-border: rgba(255, 255, 255, .1);
+  --glass-inner: rgba(255, 255, 255, .06);
+  --glass-hover: rgba(255, 255, 255, .14);
+  --glass-key-top: rgba(16, 20, 26, .58);
+  --glass-key-bot: rgba(10, 13, 18, .44);
+  --glass-text: #e2ecf6;
+}
+html.glass-light {
+  /* 白色玻璃（原来的样子） */
+  --glass-top: rgba(255, 255, 255, .11);
+  --glass-bot: rgba(255, 255, 255, .06);
+  --glass-solid: rgba(255, 255, 255, .08);
+  --glass-border: rgba(255, 255, 255, .14);
+  --glass-inner: rgba(255, 255, 255, .12);
+  --glass-hover: rgba(255, 255, 255, .2);
+  --glass-key-top: rgba(255, 255, 255, .1);
+  --glass-key-bot: rgba(255, 255, 255, .045);
+  --glass-text: #e2ecf6;
+}
+
+:fullscreen::backdrop { background: #0d1117 !important; }
   ::backdrop { background: #0d1117 !important; }
 
   html, body {
@@ -240,13 +265,13 @@
   /* ---------------- 统一的浮层视觉 ---------------- */
   #hud, .topbar .round, #numpad, #panel, #tip, #island {
     /* iOS 毛玻璃：白膜 + 发丝边 */
-    background: linear-gradient(180deg, rgba(255, 255, 255, .11) 0%, rgba(255, 255, 255, .06) 100%);
-    border: 1px solid rgba(255, 255, 255, .14);
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
     backdrop-filter: blur(26px) saturate(180%);
     -webkit-backdrop-filter: blur(26px) saturate(180%);
     box-shadow: 0 10px 28px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .04);
   }
-  #numpad { background: rgba(255, 255, 255, .05); }
+  #numpad { background: var(--glass-solid); }
   #numpad.active {
     opacity: 1; pointer-events: auto;
     background: rgba(255, 255, 255, .09);
@@ -255,8 +280,8 @@
     -webkit-backdrop-filter: blur(26px) saturate(180%);
   }
   #numpad button {
-    background: rgba(255, 255, 255, .07);
-    border: 1px solid rgba(255, 255, 255, .12);
+    background: var(--glass-solid);
+    border: 1px solid var(--glass-border);
     color: #b3c2d1;
     transition: transform .16s var(--ease-spring), background .16s ease;
   }
@@ -455,8 +480,8 @@
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 81;
     height: min(74vh, 620px);
     display: flex; flex-direction: column;
-    background: linear-gradient(180deg, rgba(255, 255, 255, .10) 0%, rgba(255, 255, 255, .05) 100%);
-    border-top: 1px solid rgba(255, 255, 255, .14);
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border-top: 1px solid var(--glass-border);
     backdrop-filter: blur(30px) saturate(180%);
     -webkit-backdrop-filter: blur(30px) saturate(180%);
     border-radius: 22px 22px 0 0;
@@ -560,9 +585,9 @@
     transition: opacity .45s var(--ease-out), transform .55s var(--ease-spring),
                 background .4s ease, border-color .4s ease; }
   #numpad button {
-    border-radius: 9px; border: 1px solid rgba(255, 255, 255, .16);
-    background: rgba(255, 255, 255, .1); color: #e4edf6; font-size: 15px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
+    border-radius: 9px; border: 1px solid var(--glass-border);
+    background: var(--glass-solid); color: var(--glass-text); font-size: 15px;
+    box-shadow: inset 0 1px 0 var(--glass-inner);
   }
   #numpad button:active { background: rgba(255, 255, 255, .2); }
   #numpad button.fn { font-size: 12px; color: #8fa3b8; }
@@ -619,13 +644,13 @@
   }
   .round {
     width: 46px; height: 46px; border-radius: 50%;
-    background: linear-gradient(180deg, rgba(255, 255, 255, .13) 0%, rgba(255, 255, 255, .07) 100%);
-    border: 1px solid rgba(255, 255, 255, .16);
-    color: #dbe7f2; font-size: 19px; display: grid; place-items: center;
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 19px; display: grid; place-items: center;
     backdrop-filter: blur(18px) saturate(180%);
     -webkit-backdrop-filter: blur(18px) saturate(180%); cursor: pointer;
   }
-  .round:active { background: rgba(255, 255, 255, .22); transform: scale(.9); }
+  .round:active { background: var(--glass-hover); transform: scale(.9); }
   .round { transition: transform .16s cubic-bezier(.32, .72, 0, 1), background .16s; }
   .round.on {
     border-color: rgba(62, 207, 142, .65);
@@ -639,8 +664,8 @@
     position: fixed; top: 50%; left: 50%;
     transform: translate(-50%, -45%) scale(.94);
     width: min(420px, calc(100vw - 40px));
-    background: linear-gradient(180deg, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, .07) 100%);
-    border: 1px solid rgba(255, 255, 255, .18);
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
     backdrop-filter: blur(30px) saturate(180%);
     -webkit-backdrop-filter: blur(30px) saturate(180%);
     border-radius: 18px; padding: 20px 22px;
@@ -679,7 +704,7 @@
   .keys { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .keys button {
     flex: 1 1 auto; min-width: 64px; padding: 10px 8px;
-    background: rgba(255, 255, 255, .07); color: #cfdcea; border: 1px solid rgba(255, 255, 255, .12);
+    background: var(--glass-solid); color: var(--glass-text); border: 1px solid var(--glass-border);
     border-radius: 10px; font-size: 13px; cursor: pointer;
   }
   .keys button:active { background: rgba(255, 255, 255, .2); }
@@ -693,7 +718,7 @@
   .kbhead span { flex: 1; }
   .mini {
     padding: 6px 12px; border-radius: 8px; font-size: 13px;
-    background: rgba(255, 255, 255, .09); color: #dbe7f2; border: 1px solid rgba(255, 255, 255, .14);
+    background: var(--glass-solid); color: var(--glass-text); border: 1px solid var(--glass-border);
   }
   #kbPad { display: flex; flex-direction: column; gap: 6px; }
   .kbrow { display: flex; gap: 6px; }
@@ -703,15 +728,15 @@
     flex: 1 1 0; min-width: 0; height: 44px;
     border-radius: 9px; font-size: 15px;
     /* iOS 风格毛玻璃：白膜 + 发丝边 + 顶部内高光（键太多，不做 backdrop-filter） */
-    background: linear-gradient(180deg, rgba(255, 255, 255, .10) 0%, rgba(255, 255, 255, .045) 100%);
-    color: #e2ecf6;
-    border: 1px solid rgba(255, 255, 255, .12);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .13),
+    background: linear-gradient(180deg, var(--glass-key-top) 0%, var(--glass-key-bot) 100%);
+    color: var(--glass-text);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-inner),
                 0 1px 2px rgba(0, 0, 0, .18);
     display: grid; place-items: center;
     -webkit-user-select: none; user-select: none;
   }
-  .kbkey:active { background: rgba(255, 255, 255, .2); }
+  .kbkey:active { background: var(--glass-hover); }
   .kbkey.on {
     background: rgba(62, 207, 142, .18);
     border-color: rgba(62, 207, 142, .55);
@@ -946,8 +971,8 @@
 
 /* ===== 数字键盘激活态：iOS 毛玻璃（覆盖前面两处旧定义，必须放最后） ===== */
 #numpad.active {
-  background: rgba(255, 255, 255, .09);
-  border-color: rgba(255, 255, 255, .18);
+  background: var(--glass-solid);
+  border-color: var(--glass-border);
   backdrop-filter: blur(26px) saturate(180%);
   -webkit-backdrop-filter: blur(26px) saturate(180%);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);

@@ -12,7 +12,7 @@
 
   /* ---------------- 连接 ---------------- */
   const S = Object.assign(
-    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0, lyrOn: true, coverBg: false },
+    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0, lyrOn: true, coverBg: false, glassDark: true },
     JSON.parse(localStorage.getItem('padtrack') || '{}')
   );
   const saveS = () => localStorage.setItem('padtrack', JSON.stringify(S));
@@ -1017,6 +1017,23 @@
     buildLine.textContent = '页面加载于 ' + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds()) +
       '（浏览器显示旧界面时刷新一下）';
   }
+  // 黑色毛玻璃：默认开，关掉就切回白色玻璃
+  const glassDarkBox = document.getElementById('glassDark');
+  function applyGlass() {
+    const dark = S.glassDark !== false;      // 默认黑色
+    document.documentElement.classList.toggle('glass-light', !dark);
+    if (glassDarkBox) glassDarkBox.checked = dark;
+  }
+  applyGlass();
+  if (glassDarkBox) {
+    glassDarkBox.addEventListener('change', () => {
+      S.glassDark = glassDarkBox.checked;
+      saveS();
+      applyGlass();
+      flash(S.glassDark ? '毛玻璃：黑色' : '毛玻璃：白色');
+    });
+  }
+
   const lyrOnBox = document.getElementById('lyrOn');
   const lyrBgBox = document.getElementById('lyrBg');
   lyrOnBox.checked = S.lyrOn !== false;
