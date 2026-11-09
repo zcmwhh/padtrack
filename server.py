@@ -777,6 +777,45 @@ def _clock_tick(key, playing):
         return _CLOCK["pos"]
 
 
+def is_admin():
+    """当前进程是不是以管理员身份运行。"""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def cursor_pos():
+    try:
+        pt = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        return [int(pt.x), int(pt.y)]
+    except Exception:
+        return None
+
+
+def inject_test():
+    """真的挪一下光标，看它到底动没动（SendInput 返回成功不代表生效）。"""
+    before = cursor_pos()
+    if before is None:
+        return {"ok": False, "reason": "拿不到光标位置"}
+    try:
+        act_move(40, 0)
+    except Exception as exc:
+        return {"ok": False, "reason": f"发送失败: {exc}"}
+    time.sleep(0.08)
+    after = cursor_pos()
+    moved = after is not None and abs(after[0] - before[0]) >= 8
+    # 挪回原处，别把用户的光标留在别处
+    if after is not None:
+        try:
+            act_move(before[0] - after[0], before[1] - after[1])
+        except Exception:
+            pass
+    return {"ok": True, "moved": moved, "before": before, "after": after,
+            "admin": is_admin()}
+
+
 def speaker_volume():
     """读系统主音量。返回 (0~1 的音量, 是否静音)；拿不到返回 (None, None)。"""
     _ensure_com()
@@ -1190,6 +1229,19 @@ class Handler(socketserver.BaseRequestHandler):
                     return
                 body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path in ("/diag", "/inject"):
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                if path == "/inject":
+                    body = json.dumps(inject_test(), ensure_ascii=False)
+                else:
+                    body = json.dumps({"admin": is_admin(), "cursor": cursor_pos()},
+                                      ensure_ascii=False)
+                self._http(sock, 200, body.encode("utf-8"),
+                           "application/json; charset=utf-8")
                 return
 
             if method == "GET" and path == "/volume":

@@ -792,6 +792,47 @@
     return p + lyricOffset;
   }
 
+  // 输入自检：真的挪一下光标，看它动没动。
+  // SendInput 返回成功却不生效的情况很多（权限、安全桌面、被程序限制），
+  // 只看返回值没用，必须看光标实际位置。
+  const diagVal = document.getElementById('diagVal');
+  async function runDiag() {
+    if (diagVal) { diagVal.textContent = '检测中…'; diagVal.classList.remove('on'); }
+    try {
+      const r = await fetch(`/inject?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      let msg;
+      if (!d.ok) {
+        msg = '失败：' + (d.reason || '未知');
+      } else if (d.moved) {
+        msg = '正常' + (d.admin ? '（管理员）' : '（普通权限）');
+      } else if (d.admin) {
+        msg = '注入被拦（管理员也拦，多半是安全桌面/光标被锁定）';
+      } else {
+        msg = '注入被拦（目标程序是管理员？试试用管理员身份启动）';
+      }
+      if (diagVal) {
+        diagVal.textContent = d.moved ? '正常' : '不生效';
+        diagVal.classList.toggle('on', !d.moved);
+      }
+      flash(msg);
+    } catch (err) {
+      if (diagVal) diagVal.textContent = '失败';
+      flash('自检失败：' + (err && err.message));
+    }
+  }
+  const diagBtn = document.getElementById('diagBtn');
+  if (diagBtn) diagBtn.addEventListener('click', (e) => { e.stopPropagation(); runDiag(); });
+
+  // 打开页面时先看看跑在什么权限下
+  (async () => {
+    try {
+      const r = await fetch(`/diag?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (diagVal) diagVal.textContent = d.admin ? '管理员' : '普通';
+    } catch (_) {}
+  })();
+
   // 把当前偏移显示出来（设置面板 + 左上角角标）
   const lyrOffVal = document.getElementById('lyrOffVal');
   const offBadge = document.getElementById('offBadge');
