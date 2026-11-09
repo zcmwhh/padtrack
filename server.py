@@ -152,7 +152,13 @@ def act_move(dx, dy):
         user32.GetCursorPos(ctypes.byref(pt))
         user32.SetCursorPos(pt.x + dx, pt.y + dy)
     else:
-        _mouse(dx, dy, 0, MOUSEEVENTF_MOVE)
+        # 正常走 SendInput；前台是管理员程序时它会被 UIPI 整个拦掉，
+        # 这时退回 SetCursorPos——它不受 UIPI 限制，光标至少还能动
+        # （点击/按键仍然会被拦，那是系统规定，绕不过去）
+        if not _mouse(dx, dy, 0, MOUSEEVENTF_MOVE):
+            pt = wintypes.POINT()
+            if user32.GetCursorPos(ctypes.byref(pt)):
+                user32.SetCursorPos(pt.x + dx, pt.y + dy)
 
 
 def act_down(b):
@@ -794,26 +800,75 @@ def cursor_pos():
         return None
 
 
+def _screen_box():
+    """虚拟桌面范围，用来挑一个不会撞墙的移动方向。"""
+    try:
+        return [user32.GetSystemMetrics(76), user32.GetSystemMetrics(77),
+                user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)]
+    except Exception:
+        return None
+
+
 def inject_test():
-    """真的挪一下光标，看它到底动没动（SendInput 返回成功不代表生效）。"""
+    """分别用 SendInput 和 SetCursorPos 挪一下光标，看它到底动没动。
+
+    SendInput 返回成功不代表生效（UIPI 会把整个调用拦掉），
+    而 SetCursorPos 不受 UIPI 限制——两者对比就能分辨原因：
+      都动            → 正常
+      只有 SetCursorPos 动 → 权限被拦（前台是管理员程序）
+      都不动          → 光标被 ClipCursor 锁住，或处在安全桌面
+    """
     before = cursor_pos()
     if before is None:
         return {"ok": False, "reason": "拿不到光标位置"}
+
+    box = _screen_box()
+    right_edge = (box[0] + box[2]) if box else 4000
+    # 别往屏幕外挪，否则读回来是"没动"，会误判
+    dx = 40 if before[0] < right_edge - 60 else -40
+
+    result = {"ok": True, "before": before, "admin": is_admin(),
+              "dx": dx, "screen": box}
+
+    # 1) SendInput
     try:
-        act_move(40, 0)
+        raw = _mouse(dx, 0, 0, MOUSEEVENTF_MOVE)
+        err = ctypes.get_last_error()
     except Exception as exc:
-        return {"ok": False, "reason": f"发送失败: {exc}"}
-    time.sleep(0.08)
-    after = cursor_pos()
-    moved = after is not None and abs(after[0] - before[0]) >= 8
-    # 挪回原处，别把用户的光标留在别处
-    if after is not None:
-        try:
-            act_move(before[0] - after[0], before[1] - after[1])
-        except Exception:
-            pass
-    return {"ok": True, "moved": moved, "before": before, "after": after,
-            "admin": is_admin()}
+        raw, err = 0, repr(exc)
+    time.sleep(0.09)
+    after1 = cursor_pos()
+    moved1 = bool(after1) and abs(after1[0] - before[0]) >= 8
+    result.update(sendinput_ret=int(raw or 0), sendinput_err=err,
+                  after_sendinput=after1, moved_sendinput=moved1)
+
+    # 2) SetCursorPos
+    cur = after1 or before
+    try:
+        ok2 = bool(user32.SetCursorPos(cur[0] + dx, cur[1]))
+        err2 = ctypes.get_last_error()
+    except Exception as exc:
+        ok2, err2 = False, repr(exc)
+    time.sleep(0.09)
+    after2 = cursor_pos()
+    moved2 = bool(after2) and abs(after2[0] - cur[0]) >= 8
+    result.update(setpos_ok=ok2, setpos_err=err2,
+                  after_setpos=after2, moved_setpos=moved2)
+
+    # 挪回原处
+    try:
+        user32.SetCursorPos(before[0], before[1])
+    except Exception:
+        pass
+
+    result["moved"] = moved1 or moved2
+    if moved1:
+        result["verdict"] = "ok"
+    elif moved2:
+        result["verdict"] = "blocked-by-uipi"
+    else:
+        result["verdict"] = "cursor-locked"
+    return result
 
 
 def speaker_volume():

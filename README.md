@@ -296,7 +296,10 @@ python selftest.py --key 1234
 
 - **必须以普通用户权限运行**。跑在低完整性级别或沙箱里时，Windows 的 UIPI 会静默丢弃输入注入
   （`SendInput` 返回成功但光标不动）
-- 目标程序以管理员身份运行时，PadTrack 也需要以管理员身份运行
+- 目标程序以管理员身份运行时，PadTrack 也需要以管理员身份运行。
+  **典型例子：WattToolkit（前 Steam++）**——它要改 hosts，必须管理员启动，
+  所以操作它的时候要用 管理员启动.bat 或右键「以管理员身份运行」打开 PadTrack，
+  否则 Windows 的 UIPI 会直接丢掉注入的输入（光标能动但点不动，或者完全不动）
 - 仅支持 Windows（依赖 `user32.SendInput`）；macOS / Linux 需替换输入后端
 - 部分杀毒软件会误报 PyInstaller 打包的 exe，加入白名单即可
 - **网易云音乐是特例**：它不注册 Windows 系统媒体控制，所以

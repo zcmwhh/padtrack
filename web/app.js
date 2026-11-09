@@ -801,19 +801,24 @@
     try {
       const r = await fetch(`/inject?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
       const d = await r.json();
-      let msg;
+      let msg, short;
       if (!d.ok) {
+        short = '失败';
         msg = '失败：' + (d.reason || '未知');
-      } else if (d.moved) {
+      } else if (d.verdict === 'ok') {
+        short = '正常';
         msg = '正常' + (d.admin ? '（管理员）' : '（普通权限）');
-      } else if (d.admin) {
-        msg = '注入被拦（管理员也拦，多半是安全桌面/光标被锁定）';
+      } else if (d.verdict === 'blocked-by-uipi') {
+        short = '被权限拦';
+        msg = '注入被权限拦：前台程序是管理员身份（WattToolkit 这类），'
+            + '请用管理员身份启动 PadTrack';
       } else {
-        msg = '注入被拦（目标程序是管理员？试试用管理员身份启动）';
+        short = '光标被锁';
+        msg = '光标被锁住：可能处在安全桌面（锁屏/UAC），或前台程序限制了光标范围';
       }
       if (diagVal) {
-        diagVal.textContent = d.moved ? '正常' : '不生效';
-        diagVal.classList.toggle('on', !d.moved);
+        diagVal.textContent = short;
+        diagVal.classList.toggle('on', d.verdict !== 'ok');
       }
       flash(msg);
     } catch (err) {
