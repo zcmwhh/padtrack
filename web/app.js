@@ -1439,13 +1439,13 @@
       K('[{',0xDB),K(']}',0xDD),K('\\|',0xDC,1.45),
     ] },
     { keys: [
-      K('Caps',0x14,1.85,'fn'),
+      K('Caps',0x14,1.85,'fn capskey'),
       K('A',0x41),K('S',0x53),K('D',0x44),K('F',0x46,1,'home'),K('G',0x47),
       K('H',0x48),K('J',0x4A,1,'home'),K('K',0x4B),K('L',0x4C),
       K(';:',0xBA),K('"\'',0xDE),KI('enter',0x0D,2.3,'fn'),
     ] },
     { keys: [
-      K('Shift',0x10,2.35,'mod'),
+      K('Shift',0x10,2.35,'mod shiftl'),
       K('Z',0x5A),K('X',0x58),K('C',0x43),K('V',0x56),K('B',0x42),
       K('N',0x4E),K('M',0x4D),K(',<',0xBC),K('.>',0xBE),K('/?',0xBF),
       K('Shift',0x10,2.35,'mod'),K('↑',0x26,1,'fn'),
@@ -1461,6 +1461,36 @@
 
   const MOD_NAME = { 0x10: 'shift', 0x11: 'ctrl', 0x12: 'alt', 0x5B: 'win' };
 
+  // ---- 左 Shift 双击锁定 ----
+  let shiftLock = false;
+  let lastShiftTap = 0;
+
+  function paintShiftLock() {
+    document.querySelectorAll('.kbkey.shiftl').forEach((b) => {
+      b.classList.toggle('locked', shiftLock);
+    });
+  }
+
+  // ---- Caps 指示灯（由服务端 /keylock 同步）----
+  let capsOn = false;
+
+  function paintCaps() {
+    document.querySelectorAll('.kbkey.capskey').forEach((b) => {
+      b.classList.toggle('capson', capsOn);
+    });
+  }
+
+  async function syncKeyLock() {
+    try {
+      const r = await fetch(`/keylock?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (typeof d.caps === 'boolean' && d.caps !== capsOn) {
+        capsOn = d.caps;
+        paintCaps();
+      }
+    } catch (_) {}
+  }
+
   function clearSticky() {
     stickyMods = [];
     document.querySelectorAll('.kbkey.on').forEach((el) => el.classList.remove('on'));
@@ -1472,6 +1502,28 @@
       flash('Fn 键无对应功能');
       return;
     }
+    // 左 Shift：双击锁定 / 再点解锁
+    if (vk === 0x10 && btn && btn.classList.contains('shiftl')) {
+      const now = performance.now();
+      if (shiftLock) {
+        shiftLock = false;
+        paintShiftLock();
+        flash('Shift 已解锁');
+        return;
+      }
+      if (now - lastShiftTap < 320) {      // 双击 → 锁定
+        shiftLock = true;
+        lastShiftTap = 0;
+        stickyMods = stickyMods.filter((m) => m !== 'shift');
+        btn.classList.remove('on');
+        paintShiftLock();
+        flash('Shift 已锁定：再点一下解锁');
+        if (navigator.vibrate) navigator.vibrate(14);
+        return;
+      }
+      lastShiftTap = now;
+    }
+
     const modName = MOD_NAME[vk];
     if (modName) {                         // 修饰键：点一下点亮，再点取消
       const idx = stickyMods.indexOf(modName);
@@ -1479,8 +1531,10 @@
       else { stickyMods.push(modName); if (btn) btn.classList.add('on'); }
       return;
     }
-    if (stickyMods.length) {
-      send({ t: 'ks', mods: stickyMods.slice(), vk });
+    const mods = stickyMods.slice();
+    if (shiftLock && !mods.includes('shift')) mods.push('shift');   // 锁定期间每个键都带 Shift
+    if (mods.length) {
+      send({ t: 'ks', mods, vk });
       clearSticky();
     } else {
       send({ t: 'k', vk });
@@ -1508,6 +1562,12 @@
         } else {
           b.textContent = key.label;
         }
+        if (b.classList.contains('capskey')) {
+          const led = document.createElement('span');
+          led.className = 'capsled';
+          b.appendChild(led);
+          b.classList.toggle('capson', capsOn);
+        }
         b.dataset.vk = key.vk;
         if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
         r.appendChild(b);
@@ -1524,6 +1584,10 @@
   }
 
   renderAll();
+  paintShiftLock();
+  paintCaps();
+  syncKeyLock();
+  setInterval(syncKeyLock, 3000);
 
   // ---------------- 记住上次用的键盘形态 ----------------
   const KB_STORE = 'padtrack.kbMode';
@@ -1842,14 +1906,14 @@
     ] },
     // 第 3 行：Caps + A…L + ; ' + 回车
     { keys: [
-      K('Caps',0x14,1.75,'fn'),TXT('A',0x41),TXT('S',0x53),TXT('D',0x44),
+      K('Caps',0x14,1.75,'fn capskey'),TXT('A',0x41),TXT('S',0x53),TXT('D',0x44),
       K('F',0x46,1,'home'),TXT('G',0x47),TXT('H',0x48),K('J',0x4A,1,'home'),
       TXT('K',0x4B),TXT('L',0x4C),K(';:',0xBA,1,'fn'),K("'\"",0xDE,1,'fn'),
       KI('enter',0x0D,2,'fn'),
     ] },
     // 第 4 行：Shift + Z…M + , . / + Shift
     { keys: [
-      K('Shift',0x10,2.15,'mod'),TXT('Z',0x5A),TXT('X',0x58),TXT('C',0x43),TXT('V',0x56),
+      K('Shift',0x10,2.15,'mod shiftl'),TXT('Z',0x5A),TXT('X',0x58),TXT('C',0x43),TXT('V',0x56),
       TXT('B',0x42),TXT('N',0x4E),TXT('M',0x4D),K(',<',0xBC,1,'fn'),K('.>',0xBE,1,'fn'),
       K('/?',0xBF,1,'fn'),K('Shift',0x10,2.15,'mod'),
     ] },
@@ -1881,6 +1945,12 @@
           b.innerHTML = KEY_ICONS[key.icon] || '';
         } else {
           b.textContent = key.label;
+        }
+        if (b.classList.contains('capskey')) {
+          const led = document.createElement('span');
+          led.className = 'capsled';
+          b.appendChild(led);
+          b.classList.toggle('capson', capsOn);
         }
         b.dataset.vk = key.vk;
         r.appendChild(b);
@@ -1983,12 +2053,47 @@
   let nubSaved = null;
   try { nubSaved = JSON.parse(localStorage.getItem(NUB_STORE) || 'null'); } catch (_) {}
 
+  // 播放器（灵动岛）在球的上层，球一旦钻进去就点不到了 —— 直接挡在外面
+  function islandZone() {
+    const isle = document.getElementById('island');
+    if (!isle) return null;
+    const cs = getComputedStyle(isle);
+    if (cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) return null;
+    const hr = kbfull.getBoundingClientRect();
+    const ir = isle.getBoundingClientRect();
+    if (ir.width < 8 || ir.height < 8) return null;
+    const pad = 10;
+    return {
+      x0: ir.left - hr.left - pad, y0: ir.top - hr.top - pad,
+      x1: ir.right - hr.left + pad, y1: ir.bottom - hr.top + pad,
+    };
+  }
+
+  function pushOutOfIsland(left, top) {
+    const z = islandZone();
+    if (!z) return [left, top];
+    const bx1 = left + NUB_SIZE, by1 = top + NUB_SIZE;
+    if (bx1 <= z.x0 || left >= z.x1 || by1 <= z.y0 || top >= z.y1) return [left, top];
+    // 四个方向里选位移最小的，把球推出禁区
+    const cands = [
+      [z.x0 - NUB_SIZE, top],
+      [z.x1, top],
+      [left, z.y0 - NUB_SIZE],
+      [left, z.y1],
+    ];
+    let best = cands[0], bestD = Infinity;
+    for (const c of cands) {
+      const d = Math.hypot(c[0] - left, c[1] - top);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
   function clampNub(left, top) {
     const host = kbfull.getBoundingClientRect();
-    return [
-      Math.max(4, Math.min(host.width - NUB_SIZE - 4, left)),
-      Math.max(4, Math.min(host.height - NUB_SIZE - 4, top)),
-    ];
+    const l = Math.max(4, Math.min(host.width - NUB_SIZE - 4, left));
+    const t = Math.max(4, Math.min(host.height - NUB_SIZE - 4, top));
+    return pushOutOfIsland(l, t);
   }
 
   function applySavedNub() {
@@ -2049,6 +2154,27 @@
   applySavedNub();
   window.addEventListener('resize', () => { if (!nubSaved) placeNub(); else applySavedNub(); });
   setTimeout(applySavedNub, 300);
+
+  // 播放器展开 / 收起后重新校验，别让球卡在后面
+  const islandEl = document.getElementById('island');
+  if (islandEl && window.MutationObserver) {
+    let nubT = 0;
+    new MutationObserver(() => {
+      clearTimeout(nubT);
+      nubT = setTimeout(() => {
+        if (!kbfull.classList.contains('open')) return;
+        const l = parseInt(kfNub.style.left, 10) || 0;
+        const t = parseInt(kfNub.style.top, 10) || 0;
+        const [nl, nt] = clampNub(l, t);
+        if (nl !== l || nt !== t) {
+          kfNub.style.left = nl + 'px';
+          kfNub.style.top = nt + 'px';
+          nubSaved = { left: nl, top: nt };
+          try { localStorage.setItem(NUB_STORE, JSON.stringify(nubSaved)); } catch (_) {}
+        }
+      }, 140);
+    }).observe(islandEl, { attributes: true, attributeFilter: ['class', 'style'] });
+  }
 
   attachPadArea(document.getElementById('kfStrip'));
   document.getElementById('kfStrip').textContent = '';

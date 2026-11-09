@@ -871,6 +871,18 @@ def inject_test():
     return result
 
 
+def key_lock_state():
+    """大小写 / 数字 / 滚动锁定的当前状态。"""
+    try:
+        return {
+            "caps": bool(user32.GetKeyState(0x14) & 1),
+            "num": bool(user32.GetKeyState(0x90) & 1),
+            "scroll": bool(user32.GetKeyState(0x91) & 1),
+        }
+    except Exception:
+        return {"caps": False, "num": False, "scroll": False}
+
+
 def foreground_info():
     """当前前台窗口是谁、是不是管理员权限。"""
     try:
@@ -1324,6 +1336,15 @@ class Handler(socketserver.BaseRequestHandler):
                     return
                 body = json.dumps(query_now(), ensure_ascii=False).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/keylock":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(key_lock_state(), ensure_ascii=False)
+                self._http(sock, 200, body.encode("utf-8"),
+                           "application/json; charset=utf-8")
                 return
 
             if method == "GET" and path == "/elevate":
@@ -1811,10 +1832,11 @@ def main():
     if existing is not None:
         old_pid = read_pid()
         old_il = process_integrity(old_pid) if old_pid else None
+        # 只要自己是管理员就能结束旧实例（哪怕它也是管理员）
         # 这次是以管理员启动、旧实例却是普通权限：必须接管，
         # 否则老实例会一直挡着，用户以为"管理员启动没用"
-        if is_admin() and old_il == "medium":
-            log(f"接管：结束普通权限的旧实例 pid={old_pid}")
+        if is_admin():
+            log(f"接管：结束旧实例 pid={old_pid}（权限 {old_il or '未知'}）")
             try:
                 subprocess.run(["taskkill", "/F", "/PID", str(old_pid)],
                                capture_output=True, timeout=8,

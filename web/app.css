@@ -765,51 +765,50 @@
     position: absolute; z-index: 5;
     width: 44px; height: 44px; padding: 0;
     border-radius: 50%;
-    /* 和 HUD / 右上角按钮同一套毛玻璃 */
-    background:
-      radial-gradient(circle at 50% 18%,
-        rgba(255, 255, 255, .18), rgba(255, 255, 255, 0) 62%),
-      rgba(22, 30, 40, .72);
-    border: 1px solid rgba(120, 150, 180, .24);
-    backdrop-filter: blur(10px) saturate(1.25);
-    -webkit-backdrop-filter: blur(10px) saturate(1.25);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, .45),
-                inset 0 1px 0 rgba(255, 255, 255, .1),
-                inset 0 -3px 8px rgba(0, 0, 0, .25);
+    /* 扁平化：一层半透明深色 + 背景模糊，和灵动岛同一观感，不用渐变和光晕 */
+    background: rgba(10, 14, 18, .72);
+    border: 1px solid rgba(255, 255, 255, .22);
+    backdrop-filter: blur(16px) saturate(1.15);
+    -webkit-backdrop-filter: blur(16px) saturate(1.15);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
     touch-action: none; cursor: pointer;
-    transition: transform .18s var(--ease-spring),
-                box-shadow .24s ease, border-color .24s ease,
-                background-color .24s ease;
-  }
-  /* 内圈细环：让它看起来像一颗打磨过的按钮，而不是一块纯色圆斑 */
-  .kf-nub::before {
-    content: ''; position: absolute; inset: 5px;
-    border-radius: 50%;
-    border: 1px solid rgba(120, 150, 180, .16);
-    pointer-events: none;
-  }
-  /* 中心薄荷绿小点：暗示"点我 = 左键" */
-  .kf-nub::after {
-    content: ''; position: absolute; left: 50%; top: 50%;
-    width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
-    border-radius: 50%;
-    background: rgba(62, 207, 142, .85);
-    box-shadow: 0 0 8px rgba(62, 207, 142, .55);
-    pointer-events: none;
-    transition: transform .18s var(--ease-spring), box-shadow .24s ease;
+    transition: background-color .18s ease, border-color .18s ease,
+                transform .18s var(--ease-spring);
   }
   .kf-nub.down {
-    border-color: rgba(62, 207, 142, .55);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .5),
-                0 0 0 4px rgba(62, 207, 142, .1),
-                inset 0 1px 0 rgba(255, 255, 255, .12);
+    background: rgba(44, 58, 74, .8);
+    border-color: rgba(255, 255, 255, .38);
+    transform: scale(.96);
   }
-  .kf-nub.down::after { transform: scale(1.35); box-shadow: 0 0 12px rgba(62, 207, 142, .8); }
   .kf-nub.drag {
-    transform: scale(1.07);
-    border-color: rgba(120, 150, 180, .38);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, .55),
-                inset 0 1px 0 rgba(255, 255, 255, .14);
+    background: rgba(26, 35, 45, .8);
+    border-color: rgba(255, 255, 255, .3);
+    transform: scale(1.05);
+  }
+
+  /* Shift 锁定提示：键面右上角的锁 */
+  .kbkey.locked::after {
+    content: ''; position: absolute; right: 7px; top: 6px;
+    width: 11px; height: 11px; opacity: .95;
+    background: no-repeat center/contain
+      url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236ee7b7' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2.4'/%3E%3Cpath d='M8 10.5V7.6a4 4 0 0 1 8 0v2.9'/%3E%3C/svg%3E");
+  }
+  .kbkey.locked {
+    border-color: rgba(62, 207, 142, .45) !important;
+    color: #6ee7b7 !important;
+  }
+
+  /* Caps 的纯白指示灯 */
+  .capsled {
+    position: absolute; left: 50%; bottom: 7px;
+    width: 6px; height: 6px; margin-left: -3px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .16);
+    transition: background .18s ease, box-shadow .18s ease;
+  }
+  .kbkey.capson .capsled {
+    background: #fff;
+    box-shadow: 0 0 7px rgba(255, 255, 255, .75);
   }
 
   /* 分屏：键盘为主 + 小触控板 */
