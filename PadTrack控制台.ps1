@@ -1,11 +1,10 @@
-﻿# PadTrack 控制中心（自绘界面，风格对齐网页端）
-param([switch]$Test, [switch]$Compile, [switch]$DataTest, [switch]$Bench)
+﻿# PadTrack 控制中心（自绘 + 后台采集，UI 线程不做阻塞 I/O）
+param([switch]$Test, [switch]$Compile)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# 高 DPI 下必须声明感知，否则整窗被位图缩放，文字发虚
 try {
     Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class DpiApi { [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
     [void][DpiApi]::SetProcessDPIAware()
@@ -14,9 +13,14 @@ try {
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exe = Join-Path $here 'PadTrack.exe'
 $keyFile = Join-Path $here 'key.txt'
-$logFile = Join-Path $here 'padtrack.log'
-$adb = Join-Path $here 'tools\platform-tools\adb.exe'
 $port = 8765
+
+try {
+    $tmpDir = Join-Path $here 'tools\tmp'
+    if (-not (Test-Path $tmpDir)) { New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null }
+    $env:TMP = $tmpDir
+    $env:TEMP = $tmpDir
+} catch {}
 
 $csharp = @'
 
@@ -25,8 +29,28 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
+
+public class StatusData
+{
+    public bool Running;
+    public int Pid;
+    public string ProcName = "?";
+    public bool NewVersion;
+    public string Device = "";
+    public bool Reverse;
+    public string LastClient = "";
+    public string LanIp = "127.0.0.1";
+    public string LogTail = "";
+}
 
 public class PadButton
 {
@@ -43,66 +67,48 @@ public class PadCenter : Form
 {
     public List<PadButton> Buttons = new List<PadButton>();
     public List<PadButton> Caps = new List<PadButton>();
-    private string[] linesData = new string[0];
-    private string logData = "";
-    public string[] Lines
-    {
-        get { return linesData; }
-        set { linesData = value; frameDirty = true; }
-    }
-    public string LogText
-    {
-        get { return logData; }
-        set { logData = value; frameDirty = true; }
-    }
     public Func<string, bool> OnAction = null;
+    public StatusData Last = null;
+    public bool GlassOn = false;
+    public string AppDir = ".";
 
-    // 设计尺寸：所有坐标按这个基准写，运行时整体缩放
     public const float DesignW = 640f;
     public const float DesignH = 700f;
 
-    public bool GlassOn = false;
+    private string[] linesData = new string[0];
+    private string logData = "";
+    private int port = 8765;
 
     private int hot = -1, down = -1;
-    private Timer anim;
+    private System.Windows.Forms.Timer anim;
     private Font fTitle, fSub, fLine, fLineB, fBtn, fLog, fTag;
     private Rectangle cardA, cardB;
     private float scale = 1f, offX = 0f, offY = 0f;
-    private Bitmap bgCache = null;
-    private Size bgCacheSize = Size.Empty;
+
     private Bitmap frameCache = null;
     private bool frameDirty = true;
     private bool dragging = false;
-    private Bitmap logCache = null;
-    private string logCacheText = null;
-    private Size logCacheSize = Size.Empty;
+
+    private DateTime adbAt = DateTime.MinValue;
+    private string adbDev = "";
+    private bool adbRev = false;
+
+    private Thread pollThread;
+    private volatile bool pollStop = false;
+    private readonly ManualResetEventSlim poke = new ManualResetEventSlim(false);
 
     private static readonly Color Accent = Color.FromArgb(62, 207, 142);
     private static readonly Color TextMain = Color.FromArgb(226, 236, 246);
     private static readonly Color TextDim = Color.FromArgb(150, 165, 180);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MARGINS
-    {
-        public int Left; public int Right; public int Top; public int Bottom;
-    }
+    private struct MARGINS { public int Left; public int Right; public int Top; public int Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct AccentPolicy
-    {
-        public int AccentState;
-        public int AccentFlags;
-        public int GradientColor;
-        public int AnimationId;
-    }
+    private struct AccentPolicy { public int AccentState; public int AccentFlags; public int GradientColor; public int AnimationId; }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct WindowCompositionData
-    {
-        public int Attribute;
-        public IntPtr Data;
-        public int SizeOfData;
-    }
+    private struct WindowCompositionData { public int Attribute; public IntPtr Data; public int SizeOfData; }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -139,15 +145,23 @@ public class PadCenter : Form
         cardA = new Rectangle(20, 92, 600, 176);
         cardB = new Rectangle(20, 404, 600, 276);
 
-        // 右上角三个窗口按钮
         Caps.Add(MakeCap("min", 472, 14));
         Caps.Add(MakeCap("max", 512, 14));
         Caps.Add(MakeCap("close", 552, 14));
 
-        anim = new Timer();
+        anim = new System.Windows.Forms.Timer();
         anim.Interval = 16;
         anim.Tick += (s, e) => Tick();
         anim.Start();
+
+        pollThread = new Thread(PollLoop);
+        pollThread.IsBackground = true;
+        pollThread.Start();
+    }
+
+    public void PokeRefresh()
+    {
+        try { poke.Set(); } catch { }
     }
 
     private PadButton MakeCap(string key, int x, int y)
@@ -163,6 +177,234 @@ public class PadCenter : Form
         b.Key = key; b.Text = text; b.Rect = new Rectangle(x, y, w, h); b.Kind = kind;
         Buttons.Add(b);
     }
+
+    // ---------------- 后台采集 ----------------
+
+    private void PollLoop()
+    {
+        while (!pollStop)
+        {
+            StatusData d = null;
+            try { d = Collect(); }
+            catch { }
+            if (d != null)
+            {
+                try
+                {
+                    if (IsHandleCreated)
+                        BeginInvoke(new Action<StatusData>(Apply), d);
+                }
+                catch { }
+            }
+            poke.Wait(2000);
+            poke.Reset();
+        }
+    }
+
+    private void Dbg(string msg)
+    {
+        try
+        {
+            File.AppendAllText(Path.Combine(AppDir, "center_poll.log"),
+                DateTime.Now.ToString("HH:mm:ss") + " " + msg + "\r\n", Encoding.UTF8);
+        }
+        catch { }
+    }
+
+    private string AdbPath() { return Path.Combine(AppDir, @"tools\platform-tools\adb.exe"); }
+
+    private string RunHidden(string file, string args, int timeoutMs)
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(file, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.WorkingDirectory = AppDir;
+            using (Process p = Process.Start(psi))
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append(p.StandardOutput.ReadToEnd());
+                sb.Append(p.StandardError.ReadToEnd());
+                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } }
+                return sb.ToString();
+            }
+        }
+        catch { return ""; }
+    }
+
+    private int FindListenerPid()
+    {
+        string outp = RunHidden(Path.Combine(Environment.SystemDirectory, "netstat.exe"), "-ano", 2500);
+        foreach (string line in outp.Split('\n'))
+        {
+            if (line.IndexOf(":" + port, StringComparison.Ordinal) < 0) continue;
+            if (line.IndexOf("LISTENING", StringComparison.OrdinalIgnoreCase) < 0) continue;
+            string[] parts = line.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 5) continue;
+            int pid;
+            if (int.TryParse(parts[parts.Length - 1], out pid)) return pid;
+        }
+        return 0;
+    }
+
+    private bool HttpOk(string url, int timeoutMs)
+    {
+        try
+        {
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+            req.Timeout = timeoutMs;
+            req.ReadWriteTimeout = timeoutMs;
+            req.Proxy = null;
+            using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                return (int)resp.StatusCode == 200;
+        }
+        catch { return false; }
+    }
+
+    private string ReadKey()
+    {
+        try
+        {
+            string f = Path.Combine(AppDir, "key.txt");
+            if (File.Exists(f)) return File.ReadAllText(f, Encoding.UTF8).Trim();
+        }
+        catch { }
+        return "";
+    }
+
+    private string DetectLanIp()
+    {
+        try
+        {
+            string f = Path.Combine(AppDir, "当前地址.txt");
+            if (File.Exists(f))
+            {
+                Match m = Regex.Match(File.ReadAllText(f, Encoding.UTF8), @"http://([0-9\.]+):");
+                if (m.Success && m.Groups[1].Value != "127.0.0.1") return m.Groups[1].Value;
+            }
+        }
+        catch { }
+        try
+        {
+            using (Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+            {
+                s.Connect("8.8.8.8", 80);
+                return ((IPEndPoint)s.LocalEndPoint).Address.ToString();
+            }
+        }
+        catch { }
+        return "127.0.0.1";
+    }
+
+    private StatusData Collect()
+    {
+        StatusData d = new StatusData();
+        d.LanIp = DetectLanIp();
+
+        int pid = FindListenerPid();
+        d.Running = pid > 0;
+        d.Pid = pid;
+        if (pid > 0)
+        {
+            try { d.ProcName = Process.GetProcessById(pid).ProcessName; } catch { d.ProcName = "?"; }
+            string key = ReadKey();
+            if (key.Length > 0)
+                d.NewVersion = HttpOk("http://127.0.0.1:" + port + "/keylock?k=" + key, 1200);
+        }
+
+        // adb 调用有成本，6 秒查一次就够
+        string adb = AdbPath();
+        if (File.Exists(adb) && (DateTime.Now - adbAt).TotalSeconds >= 6)
+        {
+            adbAt = DateTime.Now;
+            string dev = RunHidden(adb, "devices", 3000);
+            foreach (string line in dev.Split('\n'))
+            {
+                Match m = Regex.Match(line.Trim(), @"^(\S+)\s+device$");
+                if (m.Success) { adbDev = m.Groups[1].Value; break; }
+            }
+
+            adbRev = false;
+            if (adbDev.Length > 0)
+            {
+                string rev = RunHidden(adb, "reverse --list", 3000);
+                adbRev = rev.IndexOf("tcp:" + port, StringComparison.Ordinal) >= 0;
+            }
+        }
+        d.Device = adbDev;
+        d.Reverse = adbRev;
+
+        try
+        {
+            string log = Path.Combine(AppDir, "padtrack.log");
+            if (File.Exists(log))
+            {
+                string[] all = File.ReadAllLines(log, Encoding.UTF8);
+                int start = Math.Max(0, all.Length - 40);
+                StringBuilder tail = new StringBuilder();
+                for (int i = start; i < all.Length; i++) tail.AppendLine(all[i]);
+                d.LogTail = tail.ToString().TrimEnd();
+
+                for (int i = all.Length - 1; i >= 0; i--)
+                {
+                    Match m = Regex.Match(all[i], @"平板已连接:\s*(\S+)");
+                    if (m.Success) { d.LastClient = m.Groups[1].Value; break; }
+                }
+            }
+        }
+        catch { }
+
+        return d;
+    }
+
+    // ---------------- UI 更新 ----------------
+
+    private void Apply(StatusData d)
+    {
+        Last = d;
+
+        List<string> lines = new List<string>();
+        if (d.Running)
+            lines.Add("运行状态|运行中 · PID " + d.Pid + "（" + d.ProcName + "）|ok");
+        else
+            lines.Add("运行状态|未运行|warn");
+
+        if (d.Running)
+            lines.Add(d.NewVersion ? "版本|新版|ok" : "版本|旧版，建议停止后重开|warn");
+        else
+            lines.Add("版本|-|dim");
+
+        if (d.Device.Length > 0)
+            lines.Add(d.Reverse
+                ? "USB 设备|" + d.Device + "  ·  映射已建立|ok"
+                : "USB 设备|" + d.Device + "  ·  映射未建立|warn");
+        else
+            lines.Add("USB 设备|未检测到（插线并允许调试）|dim");
+
+        if (d.LastClient.Length > 0)
+            lines.Add("最近连接|" + d.LastClient + (d.LastClient == "127.0.0.1" ? "（USB）" : "（WiFi）") + "|ok");
+        else
+            lines.Add("最近连接|-|dim");
+
+        lines.Add("平板地址|http://" + d.LanIp + ":" + port + "/?k=" + ReadKey() + "|dim");
+
+        linesData = lines.ToArray();
+        logData = d.LogTail;
+        frameDirty = true;
+
+        foreach (PadButton b in Buttons)
+        {
+            if (b.Key == "start" || b.Key == "startadmin") b.Enabled = !d.Running;
+            if (b.Key == "stop") b.Enabled = d.Running;
+        }
+
+        Invalidate();
+    }
+
+    // ---------------- 绘制 ----------------
 
     private void Tick()
     {
@@ -212,7 +454,6 @@ public class PadCenter : Form
     {
         try
         {
-            // 保留投影 + 系统圆角
             MARGINS m = new MARGINS();
             m.Left = 1; m.Right = 1; m.Top = 1; m.Bottom = 1;
             DwmExtendFrameIntoClientArea(Handle, ref m);
@@ -220,16 +461,14 @@ public class PadCenter : Form
             int build = Environment.OSVersion.Version.Build;
             if (build >= 22000)
             {
-                int roundPref = 2;   // 大圆角
+                int roundPref = 2;
                 DwmSetWindowAttribute(Handle, 33, ref roundPref, sizeof(int));
-                // Mica 用壁纸采样，拖动时不用每帧重算模糊；亚克力会卡
                 int mica = 2;
                 int code = DwmSetWindowAttribute(Handle, 38, ref mica, sizeof(int));
                 if (code == 0) { GlassOn = true; return; }
             }
 
             AccentPolicy ap = new AccentPolicy();
-            // 3 = ACCENT_ENABLE_BLURBEHIND，比 4（亚克力）轻很多，拖动不卡
             ap.AccentState = 3;
             ap.AccentFlags = 2;
             ap.GradientColor = unchecked((int)0xA80C1117);
@@ -252,6 +491,13 @@ public class PadCenter : Form
         base.OnHandleCreated(e);
         ApplyGlass();
         try { DwmSetWindowAttribute(Handle, 20, ref darkMode, sizeof(int)); } catch { }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        pollStop = true;
+        try { poke.Set(); } catch { }
+        base.OnFormClosing(e);
     }
 
     protected override void OnResize(EventArgs e)
@@ -294,7 +540,6 @@ public class PadCenter : Form
         }
 
         Graphics g = e.Graphics;
-        // 拖动期间系统模糊被关掉了，先铺一层不透明底，免得透出桌面
         if (dragging)
         {
             using (SolidBrush sb = new SolidBrush(Color.FromArgb(16, 21, 27)))
@@ -302,8 +547,7 @@ public class PadCenter : Form
         }
         g.InterpolationMode = InterpolationMode.Low;
         g.PixelOffsetMode = PixelOffsetMode.Half;
-        g.DrawImage(frameCache,
-                    new RectangleF(offX, offY, DesignW * scale, DesignH * scale));
+        g.DrawImage(frameCache, new RectangleF(offX, offY, DesignW * scale, DesignH * scale));
     }
 
     private void RenderAll(Graphics g)
@@ -311,9 +555,24 @@ public class PadCenter : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-        // 背景（渐变 + 柔光）很少变，缓存成位图，重复绘制只做一次 blit
         Rectangle full = new Rectangle(0, 0, (int)DesignW, (int)DesignH);
-        g.DrawImageUnscaled(GetBackground(full.Width, full.Height), 0, 0);
+        int a1 = GlassOn ? 168 : 255;
+        int a2 = GlassOn ? 200 : 255;
+        using (LinearGradientBrush bg = new LinearGradientBrush(full,
+            Color.FromArgb(a1, 19, 25, 33), Color.FromArgb(a2, 9, 12, 17), 90f))
+        {
+            g.FillRectangle(bg, full);
+        }
+        using (GraphicsPath glow = new GraphicsPath())
+        {
+            glow.AddEllipse(-160, -220, 620, 420);
+            using (PathGradientBrush pb = new PathGradientBrush(glow))
+            {
+                pb.CenterColor = Color.FromArgb(26, 62, 207, 142);
+                pb.SurroundColors = new Color[] { Color.FromArgb(0, 62, 207, 142) };
+                g.FillPath(pb, glow);
+            }
+        }
 
         using (SolidBrush b = new SolidBrush(TextMain))
             g.DrawString("PadTrack 控制中心", fTitle, b, 22, 20);
@@ -324,7 +583,7 @@ public class PadCenter : Form
         DrawCard(g, cardB);
 
         float y = cardA.Y + 18;
-        foreach (string line in Lines)
+        foreach (string line in linesData)
         {
             string[] parts = line.Split('|');
             string label = parts.Length > 0 ? parts[0] : "";
@@ -354,71 +613,19 @@ public class PadCenter : Form
         using (SolidBrush b = new SolidBrush(Color.FromArgb(120, 8, 11, 15)))
             g.FillPath(b, Round(inner, 10));
 
-        Rectangle txtRect = new Rectangle(inner.X + 12, inner.Y + 10,
-                                          inner.Width - 24, inner.Height - 20);
-        g.DrawImageUnscaled(GetLogImage(txtRect.Width, txtRect.Height), txtRect.X, txtRect.Y);
+        RectangleF txt = new RectangleF(inner.X + 12, inner.Y + 10,
+                                        inner.Width - 24, inner.Height - 20);
+        Region oldClip = g.Clip;
+        g.SetClip(inner);
+        using (StringFormat sf = new StringFormat())
+        {
+            sf.Trimming = StringTrimming.None;
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(170, 185, 200)))
+                g.DrawString(logData ?? "", fLog, b, txt, sf);
+        }
+        g.Clip = oldClip;
 
         foreach (PadButton cap in Caps) DrawCap(g, cap);
-    }
-
-    private Bitmap GetLogImage(int w, int h)
-    {
-        string text = LogText ?? "";
-        if (logCache != null && logCacheSize.Width == w && logCacheSize.Height == h
-            && logCacheText == text)
-            return logCache;
-
-        if (logCache != null) { logCache.Dispose(); logCache = null; }
-        if (w <= 0 || h <= 0) { w = 1; h = 1; }
-
-        Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        using (Graphics gg = Graphics.FromImage(bmp))
-        {
-            gg.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            using (StringFormat sf = new StringFormat())
-            {
-                sf.Trimming = StringTrimming.None;
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(170, 185, 200)))
-                    gg.DrawString(text, fLog, b, new RectangleF(0, 0, w, h), sf);
-            }
-        }
-        logCache = bmp;
-        logCacheText = text;
-        logCacheSize = new Size(w, h);
-        return logCache;
-    }
-
-    private Bitmap GetBackground(int w, int h)
-    {
-        if (bgCache != null && bgCacheSize.Width == w && bgCacheSize.Height == h) return bgCache;
-        if (bgCache != null) { bgCache.Dispose(); bgCache = null; }
-
-        Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        using (Graphics gg = Graphics.FromImage(bmp))
-        {
-            gg.SmoothingMode = SmoothingMode.AntiAlias;
-            int a1 = GlassOn ? 168 : 255;
-            int a2 = GlassOn ? 200 : 255;
-            using (LinearGradientBrush bg = new LinearGradientBrush(
-                new Rectangle(0, 0, w, h),
-                Color.FromArgb(a1, 19, 25, 33), Color.FromArgb(a2, 9, 12, 17), 90f))
-            {
-                gg.FillRectangle(bg, 0, 0, w, h);
-            }
-            using (GraphicsPath glow = new GraphicsPath())
-            {
-                glow.AddEllipse(-160, -220, 620, 420);
-                using (PathGradientBrush pb = new PathGradientBrush(glow))
-                {
-                    pb.CenterColor = Color.FromArgb(26, 62, 207, 142);
-                    pb.SurroundColors = new Color[] { Color.FromArgb(0, 62, 207, 142) };
-                    gg.FillPath(pb, glow);
-                }
-            }
-        }
-        bgCache = bmp;
-        bgCacheSize = new Size(w, h);
-        return bgCache;
     }
 
     private void DrawCard(Graphics g, Rectangle r)
@@ -453,10 +660,7 @@ public class PadCenter : Form
             pen.EndCap = LineCap.Round;
             float cx = r.X + r.Width / 2f;
             float cy = r.Y + r.Height / 2f;
-            if (b.Key == "min")
-            {
-                g.DrawLine(pen, cx - 5, cy, cx + 5, cy);
-            }
+            if (b.Key == "min") g.DrawLine(pen, cx - 5, cy, cx + 5, cy);
             else if (b.Key == "max")
             {
                 if (WindowState == FormWindowState.Maximized)
@@ -464,10 +668,7 @@ public class PadCenter : Form
                     g.DrawRectangle(pen, cx - 5, cy - 5, 8, 8);
                     g.DrawRectangle(pen, cx - 1, cy - 1, 8, 8);
                 }
-                else
-                {
-                    g.DrawRectangle(pen, cx - 5, cy - 5, 10, 10);
-                }
+                else g.DrawRectangle(pen, cx - 5, cy - 5, 10, 10);
             }
             else
             {
@@ -540,11 +741,7 @@ public class PadCenter : Form
         base.OnMouseMove(e);
     }
 
-    protected override void OnMouseLeave(EventArgs e)
-    {
-        hot = -1;
-        base.OnMouseLeave(e);
-    }
+    protected override void OnMouseLeave(EventArgs e) { hot = -1; base.OnMouseLeave(e); }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -598,7 +795,6 @@ public class PadCenter : Form
 
         if (m.Msg == WM_ENTERSIZEMOVE)
         {
-            // 拖动期间关掉系统模糊，合成器不用每帧重采样
             SetBackdrop(1);
             dragging = true;
             anim.Stop();
@@ -611,8 +807,7 @@ public class PadCenter : Form
             frameDirty = true;
             Invalidate();
         }
-
-        if (m.Msg == WM_NCHITTEST)
+        else if (m.Msg == WM_NCHITTEST)
         {
             int screenX = (short)(m.LParam.ToInt32() & 0xFFFF);
             int screenY = (short)((m.LParam.ToInt32() >> 16) & 0xFFFF);
@@ -624,7 +819,7 @@ public class PadCenter : Form
 
             if (lp.Y < 70 && !onCap)
             {
-                m.Result = (IntPtr)2;   // HTCAPTION：可拖动
+                m.Result = (IntPtr)2;
                 return;
             }
         }
@@ -647,134 +842,16 @@ public class PadCenter : Form
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Windows.Forms, System.Drawing
 if ($Compile) { 'compiled ok'; exit 0 }
 
-# adb 在某些机器上写 %TEMP% 会没权限，统一指到本地 tools\tmp
-try {
-    $tmpDir = Join-Path $here 'tools\tmp'
-    if (-not (Test-Path $tmpDir)) { New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null }
-    $env:TMP = $tmpDir
-    $env:TEMP = $tmpDir
-} catch {}
-
 function Get-Key {
     if (Test-Path $keyFile) { return (Get-Content $keyFile -Raw).Trim() }
     return ''
 }
 
-function Get-LanIp {
-    $addrFile = Join-Path $here '当前地址.txt'
-    if (Test-Path $addrFile) {
-        $m = Select-String -Path $addrFile -Pattern 'http://([0-9\.]+):' -AllMatches
-        if ($m -and $m.Matches.Count -gt 0) {
-            $ipFromFile = $m.Matches[0].Groups[1].Value
-            if ($ipFromFile -and $ipFromFile -ne '127.0.0.1') { return $ipFromFile }
-        }
-    }
-    try {
-        $sock = New-Object System.Net.Sockets.UdpClient
-        $sock.Connect('8.8.8.8', 80)
-        $ip = $sock.Client.LocalEndPoint.Address.ToString()
-        $sock.Close()
-        if ($ip -and $ip -notlike '127.*') { return $ip }
-    } catch {}
-    return '127.0.0.1'
-}
 
-function Get-Server {
-    $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $c) { return $null }
-    $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
-    return [pscustomobject]@{ PID = $c.OwningProcess; Name = $(if ($p) { $p.ProcessName } else { '?' }) }
-}
-
-function Test-NewVersion {
-    $k = Get-Key
-    if (-not $k) { return $false }
-    try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/keylock?k=$k" -UseBasicParsing -TimeoutSec 2
-        return ($r.StatusCode -eq 200)
-    } catch { return $false }
-}
-
-# adb 是控制台程序，每次用 & 直接调用都会闪一下黑框。
-# 这里改成隐藏窗口 + 重定向输出，并且缓存 8 秒，避免 2 秒刷一次。
-$script:adbCache = @{ at = [datetime]::MinValue; dev = $null; rev = '' }
-
-function Invoke-Adb {
-    param([string[]]$Arguments)
-    if (-not (Test-Path $adb)) { return @() }
-    $tag = [guid]::NewGuid().ToString('N')
-    $outFile = Join-Path $env:TEMP ($tag + '.out')
-    $errFile = Join-Path $env:TEMP ($tag + '.err')
-    try {
-        Start-Process -FilePath $adb -ArgumentList $Arguments -WindowStyle Hidden `
-            -RedirectStandardOutput $outFile -RedirectStandardError $errFile -Wait -PassThru | Out-Null
-        if (Test-Path $outFile) { return @(Get-Content $outFile -ErrorAction SilentlyContinue) }
-        return @()
-    } catch {
-        return @()
-    } finally {
-        Remove-Item $outFile, $errFile -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Get-AdbInfo {
-    $now = Get-Date
-    if (($now - $script:adbCache.at).TotalSeconds -lt 8) { return $script:adbCache }
-
-    $dev = $null
-    foreach ($line in (Invoke-Adb @('devices'))) {
-        if ($line -match '^(\S+)\s+device$') { $dev = $Matches[1] }
-    }
-
-    $rev = ''
-    if ($dev) {
-        foreach ($line in (Invoke-Adb @('reverse', '--list'))) {
-            if ($line -match "tcp:$port") { $rev = 'on' }
-        }
-    }
-
-    $script:adbCache = @{ at = $now; dev = $dev; rev = $rev }
-    return $script:adbCache
-}
-
-function Get-AdbDevice {
-    return (Get-AdbInfo).dev
-}
-
-function Get-Reverse {
-    return (Get-AdbInfo).rev
-}
-
-function Get-LastClient {
-    if (-not (Test-Path $logFile)) { return '' }
-    $tail = Get-Content $logFile -Tail 200 -Encoding UTF8 -ErrorAction SilentlyContinue
-    $hits = $tail | Select-String '平板已连接: (\S+)'
-    if ($hits) { return $hits[-1].Matches[0].Groups[1].Value }
-    return ''
-}
-
-if ($Test) {
-    $s = Get-Server
-    'server: ' + $(if ($s) { "pid $($s.PID) $($s.Name)" } else { 'none' })
-    'new version: ' + (Test-NewVersion)
-    'adb device: ' + (Get-AdbDevice)
-    'reverse: ' + $(if (Get-Reverse) { 'on' } else { 'off' })
-    'last client: ' + (Get-LastClient)
-    'lan ip: ' + (Get-LanIp)
-    exit 0
-}
-
-
-# 让窗口里的中文不受代码页影响
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $ui = New-Object PadCenter
-try {
-    $scale = $ui.DeviceDpi / 96.0
-    if ($scale -lt 1) { $scale = 1 }
-    $ui.UiScale = $scale
-    $ui.ClientSize = New-Object System.Drawing.Size ([int](640 * $scale)), ([int](700 * $scale))
-} catch {}
+$ui.AppDir = $here
 $ui.AddButton('start',      '启动（普通权限）', 20,  292, 190, 40, 1)
 $ui.AddButton('startadmin', '以管理员启动',     222, 292, 190, 40, 0)
 $ui.AddButton('stop',       '停止服务',         424, 292, 190, 40, 2)
@@ -785,139 +862,64 @@ $ui.AddButton('copy',       '复制地址',         424, 342, 190, 36, 0)
 $ui.OnAction = [Func[string, bool]]{
     param($key)
 
-    $srv = Get-Server
+    $d = $ui.Last
     switch ($key) {
         'start' {
-            if (-not (Test-Path $exe)) { [System.Windows.Forms.MessageBox]::Show("找不到 PadTrack.exe", 'PadTrack'); return $false }
-            Start-Process -FilePath $exe -WorkingDirectory $here
-            Start-Sleep -Milliseconds 700
+            if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $here }
         }
         'startadmin' {
-            if (-not (Test-Path $exe)) { [System.Windows.Forms.MessageBox]::Show("找不到 PadTrack.exe", 'PadTrack'); return $false }
-            try { Start-Process -FilePath $exe -WorkingDirectory $here -Verb RunAs } catch {}
-            Start-Sleep -Milliseconds 1500
+            if (Test-Path $exe) {
+                try { Start-Process -FilePath $exe -WorkingDirectory $here -Verb RunAs } catch {}
+            }
         }
         'stop' {
-            if ($srv) {
-                & taskkill /f /pid $srv.PID *> $null
+            if ($d -and $d.Pid -gt 0) {
+                & taskkill /f /pid $d.Pid *> $null
                 if ($LASTEXITCODE -ne 0) {
                     try { Start-Process -FilePath (Join-Path $here '停止.bat') -Verb RunAs -WorkingDirectory $here } catch {}
                 }
-                Start-Sleep -Milliseconds 900
             }
         }
         'usb' {
             $bat = Join-Path $here 'USB直连.bat'
             if (Test-Path $bat) { Start-Process -FilePath $bat -WorkingDirectory $here }
-            Start-Sleep -Milliseconds 1600
         }
         'open' {
             $k = Get-Key
             Start-Process "http://127.0.0.1:$port/?k=$k"
         }
         'copy' {
-            [System.Windows.Forms.Clipboard]::SetText("http://$(Get-LanIp):$port/?k=$(Get-Key)")
+            $ip = if ($d) { $d.LanIp } else { '127.0.0.1' }
+            [System.Windows.Forms.Clipboard]::SetText("http://$ip`:$port/?k=$(Get-Key)")
         }
     }
-    Refresh-Ui
+    $ui.PokeRefresh()
     return $true
 }
 
-function Refresh-Ui {
-    $srv = Get-Server
-    $lines = New-Object System.Collections.Generic.List[string]
-    if ($srv) {
-        $lines.Add("运行状态|运行中 · PID $($srv.PID)（$($srv.Name)）|ok")
-    } else {
-        $lines.Add("运行状态|未运行|warn")
+if ($Test) {
+    $null = $ui.Handle            # 访问 Handle 才会真正建句柄（CreateControl 对未显示的窗体无效）
+    $ui.PokeRefresh()
+    # BeginInvoke 的回调要靠消息泵执行，这里手动泵最多 8 秒
+    $deadline = (Get-Date).AddSeconds(8)
+    while (-not $ui.Last -and (Get-Date) -lt $deadline) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 80
     }
-    if ($srv) {
-        if (Test-NewVersion) { $lines.Add('版本|新版|ok') } else { $lines.Add('版本|旧版，建议停止后重开|warn') }
-    } else {
-        $lines.Add('版本|-|dim')
-    }
-    $dev = Get-AdbDevice
-    if ($dev) {
-        $rev = Get-Reverse
-        if ($rev) { $lines.Add("USB 设备|$dev  ·  映射已建立|ok") }
-        else { $lines.Add("USB 设备|$dev  ·  映射未建立|warn") }
-    } else {
-        $lines.Add('USB 设备|未检测到（插线并允许调试）|dim')
-    }
-    $client = Get-LastClient
-    if ($client) {
-        $how = if ($client -eq '127.0.0.1') { 'USB' } else { 'WiFi' }
-        $lines.Add("最近连接|$client（$how）|ok")
-    } else {
-        $lines.Add('最近连接|-|dim')
-    }
-    $lines.Add("平板地址|http://$(Get-LanIp):$port/?k=$(Get-Key)|dim")
-    $ui.Lines = $lines.ToArray()
-
-    # 按钮状态
-    foreach ($b in $ui.Buttons) {
-        if ($b.Key -eq 'start' -or $b.Key -eq 'startadmin') { $b.Enabled = -not $srv }
-        if ($b.Key -eq 'stop') { $b.Enabled = [bool]$srv }
-    }
-
-    if (Test-Path $logFile) {
-        $ui.LogText = ((Get-Content $logFile -Tail 16 -Encoding UTF8 -ErrorAction SilentlyContinue) -join "`r`n")
-    }
-    $ui.Invalidate()
-}
-
-if ($DataTest) {
-    try {
-        Refresh-Ui
-        "Lines 数量: " + $ui.Lines.Count
-        foreach ($l in $ui.Lines) { "  " + $l }
-        "LogText 长度: " + $ui.LogText.Length
-        $b = $ui.Buttons[0]
-        "按钮0: " + $b.Text + " Enabled=" + $b.Enabled
-        $ui.CreateControl()
-        $bmp = New-Object System.Drawing.Bitmap 700, 800
-        $g2 = [System.Drawing.Graphics]::FromImage($bmp)
-        $g2.Clear([System.Drawing.Color]::FromArgb(30, 60, 30))
-        $g2.Dispose()
-        $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 700, 800))
-        $bmp.Save((Join-Path $env:TEMP 'center_draw.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-        $bmp.Dispose()
-        "已存图: " + (Join-Path $env:TEMP 'center_draw.png')
-    } catch {
-        "刷新出错: " + $_.Exception.ToString()
-    }
+    $d = $ui.Last
+    if ($d) {
+        'running: '   + $d.Running
+        'pid: '       + $d.Pid
+        'new: '       + $d.NewVersion
+        'device: '    + $d.Device
+        'reverse: '   + $d.Reverse
+        'client: '    + $d.LastClient
+        'lanip: '     + $d.LanIp
+        'logtail 长度: ' + $d.LogTail.Length
+    } else { '采集还没返回（1.5 秒）' }
     exit 0
 }
 
-if ($Bench) {
-    Refresh-Ui
-    $ui.CreateControl()
-    $bmp = New-Object System.Drawing.Bitmap 640, 700
-    $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 640, 700))
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    for ($i = 0; $i -lt 40; $i++) {
-        $ui.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, 640, 700))
-    }
-    $sw.Stop()
-    "40 帧总耗时: " + $sw.ElapsedMilliseconds + "ms"
-    "单帧: " + [Math]::Round($sw.Elapsed.TotalMilliseconds / 40, 2) + "ms"
-    "玻璃: " + $ui.GlassOn
-    $bmp.Dispose()
-    exit 0
-}
-
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 2000
-$timer.Add_Tick({ try { Refresh-Ui } catch { Add-Content -Path (Join-Path $here 'center_error.log') -Value ('ERR ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber) } })
-$timer.Start()
-
-$ui.Add_Shown({ try { Refresh-Ui } catch { Add-Content -Path (Join-Path $here 'center_error.log') -Value ('SHOWN ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber) } })
-
-# 首帧之前先同步刷一次：不依赖 Shown 事件的时序
-try { Refresh-Ui } catch {
-    Add-Content -Path (Join-Path $here 'center_error.log') -Value ('PRE ' + $_.Exception.Message + ' @ ' + $_.InvocationInfo.ScriptLineNumber)
-}
-
+$ui.Add_Shown({ $ui.PokeRefresh() })
 [void]$ui.ShowDialog()
-$timer.Stop()
 
