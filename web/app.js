@@ -1688,6 +1688,7 @@
     // 右 Shift：点一下 = 输入法中英文切换（不进粘滞修饰键列表）
     if (vk === 0x10 && btn && btn.classList.contains('shiftr')) {
       send({ t: 'ime' });
+      setTimeout(syncIme, 260);
       flash('中 / 英');
       btn.classList.add('hit');
       setTimeout(() => btn.classList.remove('hit'), 110);
@@ -1739,9 +1740,15 @@
           b.appendChild(led);
           b.classList.toggle('capson', capsOn);
         }
-        // 右 Shift 单独标记：点一下切换输入法中英文
+        // 右 Shift 单独标记：点一下切换输入法中英文，并在键上显示中/英
         if (key.vk === 0x10 && b.classList.contains('mod')
-            && !b.classList.contains('shiftl')) b.classList.add('shiftr');
+            && !b.classList.contains('shiftl')) {
+          b.classList.add('shiftr');
+          const badge = document.createElement('span');
+          badge.className = 'imeBadge';
+          badge.textContent = imeChinese ? '中' : '英';
+          b.appendChild(badge);
+        }
         b.dataset.vk = key.vk;
         if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
         r.appendChild(b);
@@ -1749,6 +1756,31 @@
       container.appendChild(r);
     });
   }
+
+  // 输入法中/英状态：右 Shift 上显示「中」或「英」
+  let imeChinese = false;
+
+  function paintImeBadge() {
+    document.querySelectorAll('.imeBadge').forEach((el) => {
+      el.textContent = imeChinese ? '中' : '英';
+      el.classList.toggle('cn', imeChinese);
+    });
+  }
+
+  let imeBusy = false;
+  async function syncIme() {
+    if (imeBusy) return;
+    if (currentKbMode() === 'pad') return;
+    imeBusy = true;
+    try {
+      const r = await fetch(`/imestate?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      const cn = !!d.chinese;
+      if (cn !== imeChinese) { imeChinese = cn; paintImeBadge(); }
+    } catch (_) {}
+    imeBusy = false;
+  }
+  setInterval(syncIme, 2000);
 
   function renderAll() {
     renderKeys(kbPad, true);
@@ -1804,8 +1836,16 @@
   /* ---------------- 全屏键盘：轻点按键，滑动当触控板 ---------------- */
   const kbfull = document.getElementById('kbfull');
 
-  const kfCentX = () => { let s = 0; for (const p of kfPts.values()) s += p.x; return kfPts.size ? s / kfPts.size : 0; };
-  const kfCentY = () => { let s = 0; for (const p of kfPts.values()) s += p.y; return kfPts.size ? s / kfPts.size : 0; };
+  const kfCentX = () => { let s = 0; for (const p of kfPts.values()) s += p.x; return kfPts.size ? s / kfPts.size : 0; }
+  const kfCentY = () => { let s = 0; for (const p of kfPts.values()) s += p.y; return kfPts.size ? s / kfPts.size : 0; }
+
+  // 每个指头单独的状态：按在哪个键、位移多少、要不要作废
+  const kfHit = new Map();
+  const kfTapMs = 650;          // 超过这个时长就不算轻点
+  const kfMovePx = 12;          // 超过这个位移就当滑动手势
+  const kfScrollPx = 16;        // 双指各自纵向移动超过这个才算滚动
+
+  const kfCancelTaps = () => { for (const h of kfHit.values()) h.cancelled = true; };
 
   kbfull.addEventListener('pointerdown', (e) => {
     // 顶部的模式切换按钮 / 退出按钮交给原生点击，不要被手势层接管
@@ -1813,15 +1853,22 @@
     try { kbfull.setPointerCapture(e.pointerId); } catch (_) {}
     kfPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+    const el = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
+    kfHit.set(e.pointerId, {
+      el, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
+      dx: 0, dy: 0, t0: performance.now(), cancelled: false,
+      moved: 0,
+    });
+
     if (kfPts.size === 1) {
       kfMode = 'tap';
       kfStartT = performance.now();
       kfMoved = 0;
       kfSX = e.clientX; kfSY = e.clientY;
       kfLastX = kfSX; kfLastY = kfSY;
-      kfTapEl = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
+      kfTapEl = el;
     } else if (kfPts.size === 2) {
-      kfMode = 'scroll';
+      kfMode = 'two';            // 待定：都划是滚动，都不动就是同时按两个键
       kfTapEl = null;
       kfLastX = kfCentX(); kfLastY = kfCentY();
       kfScroll = 0; kfScrollRem = 0;
@@ -1832,6 +1879,7 @@
       kf3T = performance.now();
       kf3x0 = kfCentX(); kf3y0 = kfCentY();
       kf3dx = 0; kf3dy = 0;
+      kfCancelTaps();
     }
     e.preventDefault();
   }, { passive: false });
@@ -1841,19 +1889,36 @@
     if (!p) return;
     p.x = e.clientX; p.y = e.clientY;
 
+    const h = kfHit.get(e.pointerId);
+    if (h) {
+      h.dx += e.clientX - h.lx;
+      h.dy += e.clientY - h.ly;
+      h.lx = e.clientX; h.ly = e.clientY;
+      h.moved = Math.hypot(e.clientX - h.x0, e.clientY - h.y0);
+    }
+
     if (kfPts.size === 1) {
-      if (kfMode === 'tap') {
-        kfMoved = Math.hypot(e.clientX - kfSX, e.clientY - kfSY);
-        if (kfMoved > 12) {          // 划开了 → 当触控板用，不触发按键
-          kfMode = 'move';
-          kfTapEl = null;
-          kfLastX = e.clientX; kfLastY = e.clientY;
-        }
+      if (kfMode === 'tap' && h && h.moved > kfMovePx) {
+        kfMode = 'move';               // 划开了 → 当触控板用，不触发按键
+        h.cancelled = true;
+        kfTapEl = null;
+        kfLastX = e.clientX; kfLastY = e.clientY;
       }
       if (kfMode === 'move') {
         kfAccX += e.clientX - kfLastX;
         kfAccY += e.clientY - kfLastY;
         kfLastX = e.clientX; kfLastY = e.clientY;
+      }
+    } else if (kfPts.size === 2 && kfMode === 'two') {
+      const hits = [...kfHit.values()];
+      const vertical = hits.length === 2
+        && hits.every((x) => Math.abs(x.dy) > kfScrollPx && Math.abs(x.dy) > Math.abs(x.dx))
+        && (hits[0].dy > 0) === (hits[1].dy > 0);
+      if (vertical) {
+        kfMode = 'scroll';
+        kfCancelTaps();
+        kfLastX = kfCentX(); kfLastY = kfCentY();
+        kfScroll = 0; kfScrollRem = 0;
       }
     } else if (kfPts.size === 2 && kfMode === 'scroll') {
       const cx = kfCentX(), cy = kfCentY();
@@ -1876,10 +1941,21 @@
 
   function kfUp(e) {
     if (!kfPts.has(e.pointerId)) return;
+    const rec = kfHit.get(e.pointerId);
+    const wasMode = kfMode;
     kfPts.delete(e.pointerId);
+    kfHit.delete(e.pointerId);
+
+    // 轻点：单指、或者两指同时按下各自的键
+    if (rec && !rec.cancelled && rec.el && rec.moved < kfMovePx
+        && performance.now() - rec.t0 < kfTapMs
+        && (wasMode === 'tap' || wasMode === 'two')) {
+      const vk = parseInt(rec.el.dataset.vk, 0);
+      if (Number.isFinite(vk)) pressKey(vk, rec.el);
+    }
 
     if (kfPts.size === 0) {
-      if (kfMode === 'three') {
+      if (wasMode === 'three') {
         const dur = performance.now() - kf3T;
         const moved = Math.hypot(kf3dx, kf3dy);
         if (moved < 26 && dur < 420) {
@@ -1902,12 +1978,15 @@
             flash('上一个窗口');
           }
         }
-      } else if (kfMode === 'tap' && kfTapEl && performance.now() - kfStartT < 600) {
-        pressKey(parseInt(kfTapEl.dataset.vk, 0), kfTapEl);
       }
       kfMode = 'idle';
       kfTapEl = null;
-    } else if (kfPts.size === 1 && kfMode === 'scroll') {
+    } else if (kfPts.size === 1 && wasMode === 'two') {
+      // 抬起一根，另一根还能正常点自己的键
+      kfMode = 'tap';
+      const rest = [...kfHit.values()][0];
+      kfTapEl = rest ? rest.el : null;
+    } else if (kfPts.size === 1 && wasMode === 'scroll') {
       kfMode = 'move';
       const p = kfPts.values().next().value;
       kfLastX = p.x; kfLastY = p.y;

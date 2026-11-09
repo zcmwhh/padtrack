@@ -52,6 +52,7 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # ---------------------------------------------------------------- SendInput
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+imm32 = ctypes.WinDLL("imm32", use_last_error=True)
 
 ULONG_PTR = ctypes.c_size_t
 
@@ -1361,6 +1362,15 @@ class Handler(socketserver.BaseRequestHandler):
                            "application/json; charset=utf-8")
                 return
 
+            if method == "GET" and path == "/imestate":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(ime_state(), ensure_ascii=False)
+                self._http(sock, 200, body.encode("utf-8"),
+                           "application/json; charset=utf-8")
+                return
+
             if method == "GET" and path == "/elevate":
                 if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
@@ -1846,7 +1856,32 @@ def launch_center():
         return 1
 
 
-def main():
+def ime_state():
+    """前台窗口当前是不是中文输入状态。
+
+    走 IMM：ImmGetContext(前台窗口) → ImmGetConversionStatus，
+    IME_CMODE_NATIVE(0x1) 置位表示中文（本地语言）模式。
+    拿不到上下文（没有输入法 / 焦点不在可输入窗口）就当作英文。
+    """
+    try:
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return {"ime": False, "chinese": False}
+        himc = imm32.ImmGetContext(wintypes.HWND(hwnd))
+        if not himc:
+            return {"ime": False, "chinese": False}
+        conv = wintypes.DWORD(0)
+        sent = wintypes.DWORD(0)
+        ok = imm32.ImmGetConversionStatus(himc, ctypes.byref(conv), ctypes.byref(sent))
+        imm32.ImmReleaseContext(wintypes.HWND(hwnd), himc)
+        if not ok:
+            return {"ime": False, "chinese": False}
+        return {"ime": True, "chinese": bool(conv.value & 0x1)}
+    except Exception:
+        return {"ime": False, "chinese": False}
+
+
+def launch_center():
     global KEY
     hidden = use_hidden_output()
 
