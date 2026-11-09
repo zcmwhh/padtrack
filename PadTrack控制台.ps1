@@ -404,7 +404,7 @@ public class PadCenter : Form
 
         foreach (PadButton b in Buttons)
         {
-            if (b.Key == "start" || b.Key == "startadmin") b.Enabled = !d.Running;
+            if (b.Key == "startadmin") b.Enabled = !d.Running;
             if (b.Key == "stop") b.Enabled = d.Running;
         }
 
@@ -907,9 +907,8 @@ function Get-Key {
 
 $ui = New-Object PadCenter
 $ui.AppDir = $here
-$ui.AddButton('start',      '启动（普通权限）', 20,  292, 190, 40, 1)
-$ui.AddButton('startadmin', '以管理员启动',     222, 292, 190, 40, 0)
-$ui.AddButton('stop',       '停止服务',         424, 292, 190, 40, 2)
+$ui.AddButton('startadmin', '启动（管理员权限）', 20,  292, 290, 40, 1)
+$ui.AddButton('stop',       '停止服务',           320, 292, 290, 40, 2)
 $ui.AddButton('usb',        'USB 直连（建映射）', 20, 342, 190, 36, 0)
 $ui.AddButton('open',       '打开平板页面',     222, 342, 190, 36, 0)
 $ui.AddButton('help',       '使用说明',         424, 342, 190, 36, 0)
@@ -932,21 +931,19 @@ $ui.OnAction = [Func[string, bool]]{
 
     $d = $ui.Last
     switch ($key) {
-        'start' {
-            if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $here }
+        'startadmin' {
+            if (Test-Path $exe) {
+                try { Start-Process -FilePath $exe -WorkingDirectory $here -Verb RunAs }
+                catch { [System.Windows.Forms.MessageBox]::Show('提权被取消，服务没起来', 'PadTrack') }
+            }
             # 起完顺手补上 USB 映射（接着线的场景就不用再点一次）
-            Start-Sleep -Milliseconds 1500
+            Start-Sleep -Milliseconds 1800
             $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
             if (Test-Path $adbExe) {
                 $devOut = & $adbExe devices 2>$null
                 if ($devOut -match '\sdevice$') {
                     & $adbExe reverse tcp:8765 tcp:8765 *> $null
                 }
-            }
-        }
-        'startadmin' {
-            if (Test-Path $exe) {
-                try { Start-Process -FilePath $exe -WorkingDirectory $here -Verb RunAs } catch {}
             }
         }
         'stop' {
