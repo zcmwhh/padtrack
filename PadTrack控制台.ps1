@@ -43,8 +43,18 @@ public class PadCenter : Form
 {
     public List<PadButton> Buttons = new List<PadButton>();
     public List<PadButton> Caps = new List<PadButton>();
-    public string[] Lines = new string[0];
-    public string LogText = "";
+    private string[] linesData = new string[0];
+    private string logData = "";
+    public string[] Lines
+    {
+        get { return linesData; }
+        set { linesData = value; frameDirty = true; }
+    }
+    public string LogText
+    {
+        get { return logData; }
+        set { logData = value; frameDirty = true; }
+    }
     public Func<string, bool> OnAction = null;
 
     // 设计尺寸：所有坐标按这个基准写，运行时整体缩放
@@ -60,6 +70,9 @@ public class PadCenter : Form
     private float scale = 1f, offX = 0f, offY = 0f;
     private Bitmap bgCache = null;
     private Size bgCacheSize = Size.Empty;
+    private Bitmap frameCache = null;
+    private bool frameDirty = true;
+    private bool dragging = false;
     private Bitmap logCache = null;
     private string logCacheText = null;
     private Size logCacheSize = Size.Empty;
@@ -170,7 +183,7 @@ public class PadCenter : Form
             if (Math.Abs(dp) > 0.01f) { b.Press += dp * 0.35f; dirty = true; }
             else if (b.Press != pt) { b.Press = pt; dirty = true; }
         }
-        if (dirty) Invalidate();
+        if (dirty) { frameDirty = true; Invalidate(); }
     }
 
     private static GraphicsPath Round(RectangleF r, float rad)
@@ -265,12 +278,38 @@ public class PadCenter : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        Graphics g = e.Graphics;
         CalcTransform();
-        g.ScaleTransform(scale, scale);
-        g.TranslateTransform(offX / scale, offY / scale);
+
+        if (frameDirty || frameCache == null)
+        {
+            if (frameCache == null)
+                frameCache = new Bitmap((int)DesignW, (int)DesignH,
+                                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (Graphics fg = Graphics.FromImage(frameCache))
+            {
+                fg.Clear(Color.Transparent);
+                RenderAll(fg);
+            }
+            frameDirty = false;
+        }
+
+        Graphics g = e.Graphics;
+        // 拖动期间系统模糊被关掉了，先铺一层不透明底，免得透出桌面
+        if (dragging)
+        {
+            using (SolidBrush sb = new SolidBrush(Color.FromArgb(16, 21, 27)))
+                g.FillRectangle(sb, 0, 0, Width, Height);
+        }
+        g.InterpolationMode = InterpolationMode.Low;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.DrawImage(frameCache,
+                    new RectangleF(offX, offY, DesignW * scale, DesignH * scale));
+    }
+
+    private void RenderAll(Graphics g)
+    {
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
         // 背景（渐变 + 柔光）很少变，缓存成位图，重复绘制只做一次 blit
         Rectangle full = new Rectangle(0, 0, (int)DesignW, (int)DesignH);
@@ -538,9 +577,41 @@ public class PadCenter : Form
         base.OnMouseUp(e);
     }
 
+    private void SetBackdrop(int kind)
+    {
+        try
+        {
+            if (Environment.OSVersion.Version.Build >= 22000)
+            {
+                int v = kind;
+                DwmSetWindowAttribute(Handle, 38, ref v, sizeof(int));
+            }
+        }
+        catch { }
+    }
+
     protected override void WndProc(ref Message m)
     {
         const int WM_NCHITTEST = 0x0084;
+        const int WM_ENTERSIZEMOVE = 0x0231;
+        const int WM_EXITSIZEMOVE = 0x0232;
+
+        if (m.Msg == WM_ENTERSIZEMOVE)
+        {
+            // 拖动期间关掉系统模糊，合成器不用每帧重采样
+            SetBackdrop(1);
+            dragging = true;
+            anim.Stop();
+        }
+        else if (m.Msg == WM_EXITSIZEMOVE)
+        {
+            SetBackdrop(2);
+            dragging = false;
+            anim.Start();
+            frameDirty = true;
+            Invalidate();
+        }
+
         if (m.Msg == WM_NCHITTEST)
         {
             int screenX = (short)(m.LParam.ToInt32() & 0xFFFF);
