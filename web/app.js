@@ -12,7 +12,7 @@
 
   /* ---------------- 连接 ---------------- */
   const S = Object.assign(
-    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0, lyrOn: true, coverBg: false, glassDark: true },
+    { sens: 1.5, accel: false, natural: true, abs: false, speed: 1.0, lyrOn: true, coverBg: false, glassDark: true, holdDrag: true },
     JSON.parse(localStorage.getItem('padtrack') || '{}')
   );
   const saveS = () => localStorage.setItem('padtrack', JSON.stringify(S));
@@ -1045,6 +1045,17 @@
     });
   }
 
+  // 长按拖动开关：默认开，关掉之后就只剩双击拖和单击
+  const holdDragBox = document.getElementById('holdDrag');
+  if (holdDragBox) {
+    holdDragBox.checked = S.holdDrag !== false;
+    holdDragBox.addEventListener('change', () => {
+      S.holdDrag = holdDragBox.checked;
+      saveS();
+      flash(S.holdDrag ? '长按拖动：开' : '长按拖动：关');
+    });
+  }
+
   const lyrOnBox = document.getElementById('lyrOn');
   const lyrBgBox = document.getElementById('lyrBg');
   lyrOnBox.checked = S.lyrOn !== false;
@@ -1107,8 +1118,15 @@
         sx = e.clientX; sy = e.clientY; st = performance.now();
         clearTimeout(lpTimer);
         lpTimer = setTimeout(() => {
-          // 还停在 pending 说明手指没怎么动，这时候才认为是"按住拖"
-          if (mode === 'pending') { mode = 'drag'; pressLeft(); flash('拖动'); }
+          // 只有「手指几乎没动」才算按住拖：再验一次位移，
+          // 否则慢慢挪的微操会被误判成拖动（手指下的东西直接被拖走）
+          if (mode !== 'pending') return;
+          if (Math.hypot(lastCX - sx, lastCY - sy) > 4) return;
+          if (S.holdDrag === false) return;
+          mode = 'drag';
+          lastCX = sx; lastCY = sy;      // 拖动的起点就是按下点
+          pressLeft();
+          flash('拖动');
         }, HOLD_MS);
       }
     } else if (pts.size === 2) {
@@ -1142,6 +1160,10 @@
     p.x = e.clientX; p.y = e.clientY;
 
     if (pts.size === 1) {
+      // 3px 就取消长按：给微操留余地，7px 才真正切换到移动
+      if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 3) {
+        clearTimeout(lpTimer);
+      }
       if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
         mode = 'move';
         clearTimeout(lpTimer);
@@ -1322,12 +1344,16 @@
       let dx = accX, dy = accY;
       accX = 0; accY = 0;
       let f = S.sens;
+      const sp0 = Math.hypot(dx, dy);
       if (S.accel) {
         // 单帧位移封顶：WiFi 抖动或掉帧时 delta 会异常大，
         // 不封顶的话加速度会把它再放大一次，看起来就是"突然冲出去"
-        const sp = Math.min(Math.hypot(dx, dy), 40);
+        const sp = Math.min(sp0, 40);
         f *= 0.62 + Math.min(sp / 26, 1) * 0.9;
       }
+      // 拖动时慢速精调：手指慢慢挪（调滑块、选文字）时再压一档，
+      // 快拖的时候不动它，保证拉窗口还是利索的
+      if (mode === 'drag' && sp0 < 8) f *= 0.8;
       remX += dx * f; remY += dy * f;
       const ix = Math.trunc(remX), iy = Math.trunc(remY);
       if (ix || iy) { remX -= ix; remY -= iy; send({ t: 'm', dx: ix, dy: iy }); }
