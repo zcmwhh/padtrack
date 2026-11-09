@@ -32,3 +32,6 @@ Thumbs.db
 
 # 本机 GUI 自动化调试目录
 .probe/
+
+# adb 之类的大体积工具（USB直连.bat 会按需下载）
+tools/
