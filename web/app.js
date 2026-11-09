@@ -320,14 +320,47 @@
     applyBgCover();
   }
 
+  // 键盘（全屏/分屏/环绕）的背景层：每个 .artbg 里放两层图片交叉淡入
+  const artHosts = [...document.querySelectorAll('.artbg')].map((host) => {
+    const a = document.createElement('img');
+    const b = document.createElement('img');
+    a.alt = '';
+    b.alt = '';
+    host.prepend(a, b);             // 放在压暗层下面
+    return { imgs: [a, b], front: 0, url: '' };
+  });
+
+  function paintArt(url) {
+    artHosts.forEach((st) => {
+      const want = url || '';
+      if (st.url === want) return;
+      st.url = want;
+      const [x, y] = st.imgs;
+      if (!want) {
+        x.classList.remove('on'); y.classList.remove('on');
+        x.removeAttribute('src'); y.removeAttribute('src');
+        return;
+      }
+      const back = st.imgs[1 - st.front];
+      const swap = () => {
+        back.classList.add('on');
+        st.imgs[st.front].classList.remove('on');
+        st.front = 1 - st.front;
+      };
+      back.src = want;
+      if (back.complete && back.naturalWidth) swap();
+      else back.onload = () => { back.onload = null; swap(); };
+    });
+  }
+
   // 封面背景：有封面且开关打开才显示
-  // 键盘（全屏/分屏/环绕）共用同一张图，通过 --art-url 传给 .artbg 图层
   function applyBgCover() {
     const on = S.coverBg === true && !!bgUrl;
     bgCoverEl.classList.toggle('on', on);
     document.documentElement.classList.toggle('art-on', on);
     document.documentElement.style.setProperty(
       '--art-url', bgUrl ? `url("${bgUrl}")` : 'none');
+    paintArt(bgUrl);
   }
 
   // 换背景：新图在背面层加载好再淡入，旧图同时淡出
@@ -1494,7 +1527,16 @@
     else document.exitFullscreen?.();
     setTimeout(() => { if (document.fullscreenElement) document.body.style.background = '#0d1117'; }, 60);
   });
-  pad.addEventListener('pointerdown', () => { if (panel.classList.contains('open')) panel.classList.remove('open'); }, true);
+  // 点触控板空白处关闭设置面板。
+  // 这里必须把这一下吃掉：否则 pointerdown 关面板后，
+  // 同一个手势还会走完 pad 的点击判定，把一次单击发给电脑。
+  pad.addEventListener('pointerdown', (e) => {
+    if (!panel.classList.contains('open')) return;
+    if (panel.contains(e.target)) return;      // 面板内部的操作不算
+    panel.classList.remove('open');
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 
   /* ---------------- 键盘（走电脑输入法） ---------------- */
   const kbPad = document.getElementById('kbPad');
