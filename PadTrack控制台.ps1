@@ -909,6 +909,16 @@ $ui.AddButton('log',        '打开日志',          20, 386, 190, 36, 0)
 $ui.AddButton('refresh',    '刷新状态',         222, 386, 190, 36, 0)
 $ui.AddButton('copy',       '复制地址',         424, 386, 190, 36, 0)
 
+# 本程序拉起来的进程（记事本等），停止服务时一起关掉
+$script:spawned = @()
+
+function Close-Spawned {
+    foreach ($id in @($script:spawned)) {
+        try { Stop-Process -Id $id -Force -ErrorAction Stop } catch {}
+    }
+    $script:spawned = @()
+}
+
 $ui.OnAction = [Func[string, bool]]{
     param($key)
 
@@ -929,6 +939,9 @@ $ui.OnAction = [Func[string, bool]]{
                     try { Start-Process -FilePath (Join-Path $here '停止.bat') -Verb RunAs -WorkingDirectory $here } catch {}
                 }
             }
+            # 本程序拉起来的 adb 守护进程也关掉，别留后台
+            & taskkill /f /im adb.exe *> $null
+            Close-Spawned
         }
         'usb' {
             $bat = Join-Path $here 'USB直连.bat'
@@ -944,13 +957,17 @@ $ui.OnAction = [Func[string, bool]]{
         }
         'help' {
             $f = Join-Path $here '使用说明.txt'
-            if (Test-Path $f) { Start-Process notepad.exe $f }
-            else { [System.Windows.Forms.MessageBox]::Show('没找到 使用说明.txt', 'PadTrack') }
+            if (Test-Path $f) {
+                $np = Start-Process notepad.exe $f -PassThru
+                if ($np) { $script:spawned += $np.Id }
+            } else { [System.Windows.Forms.MessageBox]::Show('没找到 使用说明.txt', 'PadTrack') }
         }
         'log' {
             $f = Join-Path $here 'padtrack.log'
-            if (Test-Path $f) { Start-Process notepad.exe $f }
-            else { [System.Windows.Forms.MessageBox]::Show('还没生成日志（服务没启动过？）', 'PadTrack') }
+            if (Test-Path $f) {
+                $np = Start-Process notepad.exe $f -PassThru
+                if ($np) { $script:spawned += $np.Id }
+            } else { [System.Windows.Forms.MessageBox]::Show('还没生成日志（服务没启动过？）', 'PadTrack') }
         }
         'refresh' { }
     }
