@@ -1881,7 +1881,7 @@ def ime_state():
         return {"ime": False, "chinese": False}
 
 
-def launch_center():
+def main():
     global KEY
     hidden = use_hidden_output()
 
