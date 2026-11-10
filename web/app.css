@@ -190,10 +190,10 @@ html.glass-light {
 
   .isle-cover {
     width: 30px; height: 30px; border-radius: 9px;
+    background-color: #1c2632; flex: none;
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    background: #1c2632; flex: none;
     transition: transform var(--t-slow) var(--ease-spring), border-radius var(--t-mid) var(--ease-spring);
   }
   #island.exp .isle-cover { transform: scale(.0); }
