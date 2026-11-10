@@ -242,11 +242,24 @@ public class PadCenter : Form
             psi.WorkingDirectory = AppDir;
             using (Process p = Process.Start(psi))
             {
-                StringBuilder sb = new StringBuilder();
-                sb.Append(p.StandardOutput.ReadToEnd());
-                sb.Append(p.StandardError.ReadToEnd());
-                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } }
-                return sb.ToString();
+                // 必须先异步读：进程卡住不退出时 ReadToEnd 会一直等，超时形同虚设
+                System.Threading.Tasks.Task<string> outTask = p.StandardOutput.ReadToEndAsync();
+                System.Threading.Tasks.Task<string> errTask = p.StandardError.ReadToEndAsync();
+
+                if (!p.WaitForExit(timeoutMs))
+                {
+                    try { p.Kill(); } catch { }
+                    try { p.WaitForExit(1500); } catch { }
+                }
+
+                string outp = "";
+                try
+                {
+                    if (outTask.Wait(1500)) outp += outTask.Result;
+                    if (errTask.Wait(1500)) outp += errTask.Result;
+                }
+                catch { }
+                return outp;
             }
         }
         catch { return ""; }
@@ -1012,6 +1025,17 @@ public class PadCenter : Form
 Add-Type -TypeDefinition $csharp -ReferencedAssemblies System.Windows.Forms, System.Drawing
 if ($Compile) { 'compiled ok'; exit 0 }
 
+# 带超时地跑一次 adb：adb 服务器卡死时不会把界面拖住
+function Invoke-AdbQuick {
+    param([string[]]$AdbArgs, [int]$TimeoutSec = 4)
+    $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
+    if (-not (Test-Path $adbExe)) { return }
+    $p = Start-Process -FilePath $adbExe -ArgumentList $AdbArgs -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+    if (-not $p) { return }
+    try { Wait-Process -Id $p.Id -Timeout $TimeoutSec -ErrorAction Stop }
+    catch { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }
+}
+
 function Get-Key {
     if (Test-Path $keyFile) { return (Get-Content $keyFile -Raw).Trim() }
     return ''
@@ -1053,13 +1077,7 @@ $ui.OnAction = [Func[string, bool]]{
             }
             # 起完顺手补上 USB 映射（接着线的场景就不用再点一次）
             Start-Sleep -Milliseconds 1800
-            $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
-            if (Test-Path $adbExe) {
-                $devOut = & $adbExe devices 2>$null
-                if ($devOut -match '\sdevice$') {
-                    & $adbExe reverse tcp:8765 tcp:8765 *> $null
-                }
-            }
+            Invoke-AdbQuick -AdbArgs @('reverse', 'tcp:8765', 'tcp:8765') -TimeoutSec 5
         }
         'stop' {
             if ($d -and $d.Pid -gt 0) {
@@ -1070,10 +1088,7 @@ $ui.OnAction = [Func[string, bool]]{
             }
             # 先撤销 USB 映射（映射挂在 adb 守护进程里，杀掉就没了，
             # 但显式撤销能让平板端马上释放 127.0.0.1:8765）
-            $adbExe = Join-Path $here 'tools\platform-tools\adb.exe'
-            if (Test-Path $adbExe) {
-                & $adbExe reverse --remove-all *> $null
-            }
+            Invoke-AdbQuick -AdbArgs @('reverse', '--remove-all') -TimeoutSec 4
             # 本程序拉起来的 adb 守护进程也关掉，别留后台
             & taskkill /f /im adb.exe *> $null
             Close-Spawned
