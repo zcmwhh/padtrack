@@ -84,11 +84,11 @@
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
   let lastTapX = 0, lastTapY = 0;      // 上一次点击落点，用来判断是不是真的双击
-  const DBL_SLOP = 8;                  // 两次点击允许的位置偏差
-  const DBL_MS = 300;                  // 两次点击的最大间隔（人手双击一般在 250ms 内）
-  const DBL_MOVE = 14;                 // 第二下按下后要真的移动这么远才开拖
-  const DBL_STILL = 80;                // 第二下必须先停稳这么久，才允许进入拖拽候选
-  const DBL_WOBBLE = 6;                // 停稳期间允许的手抖幅度，超过就当普通移动
+  const DBL_SLOP = 24;                 // 两次点击允许的位置偏差（手指点不到同一点）
+  const DBL_MS = 380;                  // 两次点击的最大间隔（给手慢的人留余量）
+  const DBL_MOVE = 10;                 // 第二下按住后移动这么远就开拖
+  const DBL_STILL = 60;                // 停稳多久后进入拖拽候选（按住不动也能开拖）
+  const DBL_WOBBLE = 18;               // 按住后的自然抖动幅度，超过才算滑走
   const HOLD_MS = 420;                 // 按住多久算拖动
 
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
@@ -1178,6 +1178,7 @@
         // 先等手指停稳（DBL_STILL），期间抖了就退回普通移动
         mode = 'dblwait';
         dblX = e.clientX; dblY = e.clientY;
+        lastCX = e.clientX; lastCY = e.clientY;   // 基准点跟手，别用第一下的旧坐标
         clearTimeout(dblTimer);
         dblTimer = setTimeout(() => {
           if (mode === 'dblwait') mode = 'armed';
@@ -1242,11 +1243,17 @@
         // 否则第一帧会把整段距离一次性发出去，表现为"起步瞬移"
         lastCX = e.clientX; lastCY = e.clientY;
       }
-      if (mode === 'dblwait' && Math.hypot(e.clientX - dblX, e.clientY - dblY) > DBL_WOBBLE) {
-        // 第二下还没停稳就滑走了：不是双击拖，按普通移动处理（光标继续跟手）
-        clearTimeout(dblTimer);
-        mode = 'move';
-        lastCX = e.clientX; lastCY = e.clientY;
+      if (mode === 'dblwait') {
+        const dd = Math.hypot(e.clientX - dblX, e.clientY - dblY);
+        if (dd > DBL_MOVE) {
+          // 第二下按住后一动就开拖：不再要求先停稳 80ms 再判定，
+          // 这正是「双击完动一点就拖不动」的根源
+          clearTimeout(dblTimer);
+          mode = 'drag';
+          send({ t: 'dblstart' });
+          flash('拖动');
+          lastCX = e.clientX; lastCY = e.clientY;
+        }
       }
       if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > DBL_MOVE) {
         mode = 'drag';
