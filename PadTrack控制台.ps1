@@ -230,6 +230,9 @@ public class PadCenter : Form
 
     private string AdbPath() { return Path.Combine(AppDir, @"tools\platform-tools\adb.exe"); }
 
+    private bool lastRunTimedOut = false;
+    private DateTime adbRestartedAt = DateTime.MinValue;
+
     private string RunHidden(string file, string args, int timeoutMs)
     {
         try
@@ -246,8 +249,10 @@ public class PadCenter : Form
                 System.Threading.Tasks.Task<string> outTask = p.StandardOutput.ReadToEndAsync();
                 System.Threading.Tasks.Task<string> errTask = p.StandardError.ReadToEndAsync();
 
+                lastRunTimedOut = false;
                 if (!p.WaitForExit(timeoutMs))
                 {
+                    lastRunTimedOut = true;
                     try { p.Kill(); } catch { }
                     try { p.WaitForExit(1500); } catch { }
                 }
@@ -278,6 +283,23 @@ public class PadCenter : Form
             if (int.TryParse(parts[parts.Length - 1], out pid)) return pid;
         }
         return 0;
+    }
+
+    private void RestartAdb(string adbPath)
+    {
+        bool hadReverse = adbRev;
+        try
+        {
+            RunHidden(Path.Combine(Environment.SystemDirectory, "taskkill.exe"),
+                      "/f /im adb.exe", 3000);
+            Thread.Sleep(600);
+            RunHidden(adbPath, "start-server", 6000);
+            Thread.Sleep(400);
+            if (hadReverse)
+                RunHidden(adbPath, "reverse tcp:" + port + " tcp:" + port, 5000);
+            adbRestartedAt = DateTime.Now;
+        }
+        catch { }
     }
 
     private bool HttpOk(string url, int timeoutMs)
@@ -398,6 +420,18 @@ public class PadCenter : Form
                 d.NewVersion = HttpOk("http://127.0.0.1:" + port + "/keylock?k=" + key, 1200);
         }
 
+        // adb 看门狗：上一次查询超时 → 大概率服务器卡死，直接重启它
+        string adbPath = AdbPath();
+        if (File.Exists(adbPath) && (DateTime.Now - adbRestartedAt).TotalSeconds > 20)
+        {
+            bool wedged = !string.IsNullOrEmpty(lastRunTimedOut ? "1" : "") && lastRunTimedOut;
+            if (wedged)
+            {
+                RestartAdb(adbPath);
+                lastRunTimedOut = false;
+            }
+        }
+
         // adb 调用有成本，6 秒查一次就够
         string adb = AdbPath();
         if (File.Exists(adb) && (DateTime.Now - adbAt).TotalSeconds >= 6)
@@ -461,9 +495,12 @@ public class PadCenter : Form
             lines.Add("版本|-|dim");
 
         if (d.Device.Length > 0)
+        {
+            string tail = (DateTime.Now - adbRestartedAt).TotalSeconds < 60 ? "（adb 已自动重启）" : "";
             lines.Add(d.Reverse
-                ? "USB 设备|" + d.Device + "  ·  映射已建立|ok"
-                : "USB 设备|" + d.Device + "  ·  映射未建立|warn");
+                ? "USB 设备|" + d.Device + "  ·  映射已建立" + tail + "|ok"
+                : "USB 设备|" + d.Device + "  ·  映射未建立" + tail + "|warn");
+        }
         else
             lines.Add("USB 设备|未检测到（插线并允许调试）|dim");
 
