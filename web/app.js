@@ -84,12 +84,13 @@
   let pinchRef = null;
   let velY = 0, inertia = 0, lastTapEnd = 0;
   let lastTapX = 0, lastTapY = 0;      // 上一次点击落点，用来判断是不是真的双击
-  const DBL_SLOP = 24;                 // 两次点击允许的位置偏差（手指点不到同一点）
-  const DBL_MS = 380;                  // 两次点击的最大间隔（给手慢的人留余量）
-  const DBL_MOVE = 10;                 // 第二下按住后移动这么远就开拖
-  const DBL_STILL = 60;                // 停稳多久后进入拖拽候选（按住不动也能开拖）
-  const DBL_WOBBLE = 18;               // 按住后的自然抖动幅度，超过才算滑走
-  const HOLD_MS = 420;                 // 按住多久算拖动
+  const DBL_SLOP = 14;                 // 两次点击允许的位置偏差（约 3.5mm，再大就吃掉两次独立点击）
+  const DBL_MS = 320;                  // 两次点击的最大间隔
+  const DBL_MOVE = 12;                 // 第二下按住后移动这么远就开拖
+  const DBL_STILL = 80;                // 停稳多久后进入拖拽候选
+  const DBL_WOBBLE = 14;               // 按住后的自然抖动幅度，超过才算滑走
+  const HOLD_MS = 550;                 // 按住多久进入「准备拖动」（此时还不会按下）
+  const HOLD_MOVE = 12;                // 进入准备态后，还要再移动这么远才真正开拖
 
   // 全屏键盘上的手势状态（和触控板各自独立，互不干扰）
   const kfPts = new Map();
@@ -1194,10 +1195,10 @@
           if (mode !== 'pending') return;
           if (Math.hypot(lastCX - sx, lastCY - sy) > 4) return;
           if (S.holdDrag === false) return;
-          mode = 'drag';
-          lastCX = sx; lastCY = sy;      // 拖动的起点就是按下点
-          pressLeft();
-          flash('拖动');
+          // 先不按左键：慢点的人本来只想单击，一到 550ms 就按下去了，
+          // 之后手稍一偏窗口就飞。改成等真的再移动才按。
+          mode = 'holdwait';
+          lastCX = sx; lastCY = sy;
         }, HOLD_MS);
       }
     } else if (pts.size === 2) {
@@ -1236,7 +1237,7 @@
       if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 3) {
         clearTimeout(lpTimer);
       }
-      if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
+      if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 11) {
         mode = 'move';
         clearTimeout(lpTimer);
         // 用当前点做基准：阈值内那几像素直接丢掉，
@@ -1253,6 +1254,14 @@
           send({ t: 'dblstart' });
           flash('拖动');
           lastCX = e.clientX; lastCY = e.clientY;
+        }
+      }
+      if (mode === 'holdwait') {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > HOLD_MOVE) {
+          mode = 'drag';
+          lastCX = e.clientX; lastCY = e.clientY;
+          pressLeft();
+          flash('拖动');
         }
       }
       if (mode === 'armed' && Math.hypot(e.clientX - lastCX, e.clientY - lastCY) > DBL_MOVE) {
@@ -1340,6 +1349,10 @@
         if (now - st < 330 && Math.hypot(e.clientX - sx, e.clientY - sy) < 12) {
           click('l'); lastTapEnd = now; lastTapX = e.clientX; lastTapY = e.clientY;
         }
+      } else if (mode === 'holdwait') {
+        // 按住了但没移动 → 就是一次普通单击
+        clearTimeout(dblTimer);
+        click('l');
       } else if (mode === 'armed' || mode === 'dblwait') {
         // 第二下没有移动就松开 = 普通的第二次单击，双击（如标题栏最大化）照常
         clearTimeout(dblTimer);
@@ -2036,7 +2049,7 @@
       q.x = e.clientX; q.y = e.clientY;
 
       if (p.size === 1) {
-        if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 7) {
+        if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 11) {
           mode = 'move';
           lx = e.clientX; ly = e.clientY;
         }
