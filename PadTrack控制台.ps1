@@ -100,6 +100,8 @@ public class PadCenter : Form
     private readonly List<Rectangle> chipRects = new List<Rectangle>();
     private readonly List<string> chipUrls = new List<string>();
     private int chipHot = -1;
+    private DateTime usbOpenedAt = DateTime.MinValue;   // USB 直连刚点过 → 禁用一会儿
+    private DateTime startAskedAt = DateTime.MinValue;  // 刚点过启动 → 等一下看结果
     private DateTime toastAt = DateTime.MinValue;
 
     private Bitmap frameCache = null;
@@ -479,8 +481,28 @@ public class PadCenter : Form
 
     // ---------------- UI 更新 ----------------
 
+    private void CheckStartResult()
+    {
+        if (startAskedAt == DateTime.MinValue) return;
+        double sec = (DateTime.Now - startAskedAt).TotalSeconds;
+        if (sec < 8 || sec > 20) return;
+        if (Last != null && Last.Running) { startAskedAt = DateTime.MinValue; return; }
+        startAskedAt = DateTime.MinValue;
+        try
+        {
+            MessageBox.Show(
+                "服务没有起来。可能原因：\n\n" +
+                "1. UAC 提示被取消了（看看任务栏有没有闪烁的盾牌图标）\n" +
+                "2. 安全软件拦了提权\n\n" +
+                "实在不行双击文件夹里的「管理员启动.bat」。",
+                "PadTrack 启动失败");
+        }
+        catch { }
+    }
+
     private void Apply(StatusData d)
     {
+        CheckStartResult();
         Last = d;
 
         List<string> lines = new List<string>();
@@ -531,7 +553,18 @@ public class PadCenter : Form
 
         foreach (PadButton b in Buttons)
         {
-            if (b.Key == "startadmin") b.Enabled = !d.Running;
+            if (b.Key == "startadmin")
+            {
+                b.Enabled = !d.Running;
+                // 运行中就直说，别留个灰按钮让人反复点
+                b.Text = d.Running ? "已启动（运行中）" : "启动（管理员权限）";
+                if (!d.Running && startAskedAt != DateTime.MinValue
+                    && (DateTime.Now - startAskedAt).TotalSeconds < 10)
+                    b.Text = "正在启动…";
+            }
+            // USB 直连点过一次后禁用 30 秒，避免重复打开
+            if (b.Key == "usb")
+                b.Enabled = (DateTime.Now - usbOpenedAt).TotalSeconds > 30;
             if (b.Key == "stop") b.Enabled = d.Running;
         }
 
@@ -976,7 +1009,14 @@ public class PadCenter : Form
             else
             {
                 PadButton b = Buttons[hit];
-                if (b.Enabled && OnAction != null) { try { OnAction(b.Key); } catch { } }
+                if (b.Enabled)
+                {
+                    if (b.Key == "usb") usbOpenedAt = DateTime.Now;
+                    if (b.Key == "startadmin") startAskedAt = DateTime.Now;
+                    if (OnAction != null) { try { OnAction(b.Key); } catch { } }
+                    frameDirty = true;
+                    Invalidate();
+                }
             }
         }
         else if (hit < 0)
