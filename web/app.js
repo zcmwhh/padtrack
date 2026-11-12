@@ -1791,11 +1791,45 @@
     });
   }
 
+  // 键区按指针逐个处理：这样两根手指同时按两个键都能触发。
+  // 用 click 不行——多点触控时浏览器只会给第一个手指发 click，第二个被丢掉。
+  function attachKeyPad(container) {
+    const hits = new Map();       // pointerId → { el, x0, y0, moved }
+    container.addEventListener('pointerdown', (e) => {
+      const el = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
+      if (!el || el.dataset.vk === undefined) return;
+      try { container.setPointerCapture(e.pointerId); } catch (_) {}
+      hits.set(e.pointerId, { el, x0: e.clientX, y0: e.clientY, moved: 0 });
+      e.preventDefault();          // 拦掉合成 click，避免一次按键发两条
+    }, { passive: false });
+
+    container.addEventListener('pointermove', (e) => {
+      const h = hits.get(e.pointerId);
+      if (!h) return;
+      h.moved = Math.hypot(e.clientX - h.x0, e.clientY - h.y0);
+    }, { passive: false });
+
+    const finish = (e) => {
+      const h = hits.get(e.pointerId);
+      if (!h) return;
+      hits.delete(e.pointerId);
+      // 手指没怎么动才算按下这个键（划动是触控板手势，不是打字）
+      if (h.moved < 14) {
+        const vk = parseInt(h.el.dataset.vk, 10);
+        if (Number.isFinite(vk)) pressKey(vk, h.el);
+      }
+    };
+    container.addEventListener('pointerup', finish);
+    container.addEventListener('pointercancel', (e) => { hits.delete(e.pointerId); });
+  }
+
   function renderAll() {
-    renderKeys(kbPad, true);
+    renderKeys(kbPad, false);
     // 全屏/分屏键盘不绑 click：由手势层判定「轻点 = 按键」，否则滑动手势会误触
     renderKeys(kfPadEl, false);
-    renderKeys(spKeysEl, true);
+    renderKeys(spKeysEl, false);
+    attachKeyPad(kbPad);
+    attachKeyPad(spKeysEl);
   }
 
   renderAll();
@@ -2020,27 +2054,53 @@
     let accX = 0, accY = 0, remX = 0, remY = 0, sc = 0, scRem = 0;
     let twoPend = false, twoT = 0, twoMoved = 0;
     let k3Pend = false, k3T = 0, k3dx = 0, k3dy = 0, k3x0 = 0, k3y0 = 0;
+    // 拖动相关（和主触控板同一套参数）
+    let lpTimer = 0, dblTimer = 0;
+    let dblX = 0, dblY = 0;
+    let lastTapEnd = 0, lastTapX = 0, lastTapY = 0;
 
     const cx = () => { let s = 0; for (const q of p.values()) s += q.x; return p.size ? s / p.size : 0; };
     const cy = () => { let s = 0; for (const q of p.values()) s += q.y; return p.size ? s / p.size : 0; };
+    const clearTimers = () => { clearTimeout(lpTimer); clearTimeout(dblTimer); };
 
     el.addEventListener('pointerdown', (e) => {
       e.stopPropagation();          // 不要让事件冒泡到外层键盘手势层，否则光标会动两次
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
       p.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (p.size === 1) {
-        mode = 'pending';
         sx = e.clientX; sy = e.clientY;
         lx = sx; ly = sy; st = performance.now();
         twoPend = false; k3Pend = false;
+        accX = 0; accY = 0;
+
+        const nearTap = Math.hypot(sx - lastTapX, sy - lastTapY) <= DBL_SLOP;
+        if (performance.now() - lastTapEnd < DBL_MS && nearTap) {
+          // 双击的第二下：先不按，等手指一动才开拖
+          mode = 'dblwait';
+          dblX = sx; dblY = sy;
+          clearTimers();
+          dblTimer = setTimeout(() => { if (mode === 'dblwait') mode = 'armed'; }, DBL_STILL);
+          lastTapEnd = 0;
+        } else {
+          mode = 'pending';
+          clearTimers();
+          lpTimer = setTimeout(() => {
+            if (mode !== 'pending') return;
+            if (Math.hypot(lx - sx, ly - sy) > 4) return;   // 动了就不算长按
+            if (S.holdDrag === false) return;
+            mode = 'holdwait';
+          }, HOLD_MS);
+        }
       } else if (p.size === 2) {
         mode = 'scroll';
+        clearTimers();
         lx = cx(); ly = cy(); sc = 0; scRem = 0;
         // 双指轻点 = 右键（和主触控板一致）
         twoPend = true; twoT = performance.now(); twoMoved = 0;
         k3Pend = false;
       } else {
         mode = 'swipe3';                    // 三指：轻点=开始菜单，滑动=切窗口/任务视图
+        clearTimers();
         k3Pend = true; k3T = performance.now();
         k3x0 = cx(); k3y0 = cy(); k3dx = 0; k3dy = 0;
         twoPend = false;
@@ -2054,21 +2114,51 @@
       q.x = e.clientX; q.y = e.clientY;
 
       if (p.size === 1) {
-        if (mode === 'pending' && Math.hypot(e.clientX - sx, e.clientY - sy) > 11) {
-          mode = 'move';
-          lx = e.clientX; ly = e.clientY;
+        if (mode === 'pending') {
+          if (Math.hypot(e.clientX - sx, e.clientY - sy) > 11) {
+            mode = 'move';
+            clearTimeout(lpTimer);
+            lx = e.clientX; ly = e.clientY;
+          }
+        } else if (mode === 'holdwait') {
+          // 按住够了，再动一点才开始真的拖
+          if (Math.hypot(e.clientX - sx, e.clientY - sy) > HOLD_MOVE) {
+            mode = 'drag';
+            lx = e.clientX; ly = e.clientY;
+            pressLeft();
+            flash('拖动');
+          }
+        } else if (mode === 'dblwait') {
+          if (Math.hypot(e.clientX - dblX, e.clientY - dblY) > DBL_MOVE) {
+            clearTimeout(dblTimer);
+            mode = 'drag';
+            lx = e.clientX; ly = e.clientY;
+            send({ t: 'dblstart' });
+            flash('拖动');
+          }
+        } else if (mode === 'armed') {
+          if (Math.hypot(e.clientX - lx, e.clientY - ly) > DBL_MOVE) {
+            mode = 'drag';
+            lx = e.clientX; ly = e.clientY;
+            send({ t: 'dblstart' });
+            flash('拖动');
+          }
         }
-        if (mode === 'move') {
+
+        if (mode === 'move' || mode === 'drag') {
           accX += e.clientX - lx;
           accY += e.clientY - ly;
           lx = e.clientX; ly = e.clientY;
         }
       } else if (mode === 'scroll') {
-        const ny = cy();
-        sc += ((ny - ly) / PX_PER_NOTCH) * S.speed;
-        lx = cx(); ly = ny;
-        twoMoved += 1;
-        if (twoMoved > 12) twoPend = false;
+        const nx = cx(), ny = cy();
+        const mdx = nx - lx, mdy = ny - ly;
+        sc += (mdy / PX_PER_NOTCH) * S.speed;
+        lx = nx; ly = ny;
+        // 按「重心移动距离」判断是不是在滑，不能用事件个数：
+        // 事件会被合并，滚一大段可能只来几个事件，结果被当成双指轻点 → 松手误弹右键
+        twoMoved += Math.hypot(mdx, mdy);
+        if (twoMoved > 20) twoPend = false;
       } else if (p.size === 3 && mode === 'swipe3') {
         const dx = cx() - k3x0;
         const dy = cy() - k3y0;
@@ -2088,13 +2178,16 @@
     function up(e) {
       if (!p.has(e.pointerId)) return;
       e.stopPropagation();
+      const wasMode = mode;
       p.delete(e.pointerId);
+
       if (p.size === 0) {
         const twoTap = twoPend && performance.now() - twoT < 380;
         const three = k3Pend;
         const threeDur = performance.now() - k3T;
         twoPend = false;
         k3Pend = false;
+        clearTimers();
 
         if (three) {
           const moved = Math.hypot(k3dx, k3dy);
@@ -2109,12 +2202,17 @@
           }
         } else if (twoTap) {
           click('r');
-        } else if (mode === 'pending' && performance.now() - st < 320) {
+        } else if (wasMode === 'drag') {
+          releaseLeft();                      // 拖动结束
+        } else if (wasMode === 'pending' || wasMode === 'holdwait'
+                   || wasMode === 'armed' || wasMode === 'dblwait') {
           click('l');
+          lastTapEnd = performance.now();
+          lastTapX = e.clientX; lastTapY = e.clientY;
         }
         mode = 'idle';
       } else if (p.size === 1) {
-        if (!k3Pend) {
+        if (!k3Pend && wasMode !== 'drag') {
           mode = 'move';
           const q = p.values().next().value;
           lx = q.x; ly = q.y;
@@ -2237,12 +2335,8 @@
   buildTri();
 
   // 顶部与两侧都走点击；触控板由 attachPadArea 处理
-  trmode.addEventListener('click', (e) => {
-    const b = e.target && e.target.closest ? e.target.closest('.kbkey') : null;
-    if (!b || b.dataset.vk === undefined) return;
-    const vk = parseInt(b.dataset.vk, 10);
-    if (Number.isFinite(vk)) pressKey(vk, b);
-  });
+  // 环绕模式：键区走指针逐个处理（trPad 自己的手势层会 stopPropagation，不会打架）
+  attachKeyPad(trmode);
 
   document.getElementById('trClose').addEventListener('click', () => showMode('pad'));
 
