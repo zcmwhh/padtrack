@@ -234,6 +234,9 @@ public class PadCenter : Form
 
     private bool lastRunTimedOut = false;
     private DateTime adbRestartedAt = DateTime.MinValue;
+    private DateTime adbWindowStart = DateTime.MinValue;   // 统计窗口起点
+    private int adbRestartCount = 0;                        // 窗口内重启次数
+    private string adbGiveUpUntil = "";                     // 放弃提示（空=正常）
 
     private string RunHidden(string file, string args, int timeoutMs)
     {
@@ -287,19 +290,60 @@ public class PadCenter : Form
         return 0;
     }
 
+    private bool AdbServerListening()
+    {
+        try
+        {
+            string outp = RunHidden(Path.Combine(Environment.SystemDirectory, "netstat.exe"),
+                                    "-ano", 2500);
+            foreach (string line in outp.Split('\n'))
+            {
+                if (line.IndexOf(":5037", StringComparison.Ordinal) >= 0 &&
+                    line.IndexOf("LISTENING", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private void RestartAdb(string adbPath)
     {
+        // 节流：120 秒内只允许重启一次；10 分钟内最多 3 次
+        if ((DateTime.Now - adbRestartedAt).TotalSeconds < 120) return;
+        if ((DateTime.Now - adbWindowStart).TotalMinutes > 10)
+        {
+            adbWindowStart = DateTime.Now;
+            adbRestartCount = 0;
+        }
+        if (adbRestartCount >= 3)
+        {
+            adbGiveUpUntil = "adb 反复无响应，请重启控制中心";
+            return;
+        }
+
         bool hadReverse = adbRev;
         try
         {
-            RunHidden(Path.Combine(Environment.SystemDirectory, "taskkill.exe"),
-                      "/f /im adb.exe", 3000);
+            // 先礼后兵：让它自己退出，不行再强杀
+            RunHidden(adbPath, "kill-server", 4000);
+            Thread.Sleep(800);
+            if (AdbServerListening())
+                RunHidden(Path.Combine(Environment.SystemDirectory, "taskkill.exe"),
+                          "/f /im adb.exe", 3000);
             Thread.Sleep(600);
+
+            // 等服务端口真的空出来，再起新的；否则会起出第二个服务器互相抢
+            for (int i = 0; i < 8 && AdbServerListening(); i++) Thread.Sleep(300);
+
             RunHidden(adbPath, "start-server", 6000);
-            Thread.Sleep(400);
+            Thread.Sleep(500);
             if (hadReverse)
                 RunHidden(adbPath, "reverse tcp:" + port + " tcp:" + port, 5000);
+
             adbRestartedAt = DateTime.Now;
+            adbRestartCount++;
+            adbGiveUpUntil = "";
         }
         catch { }
     }
@@ -424,14 +468,10 @@ public class PadCenter : Form
 
         // adb 看门狗：上一次查询超时 → 大概率服务器卡死，直接重启它
         string adbPath = AdbPath();
-        if (File.Exists(adbPath) && (DateTime.Now - adbRestartedAt).TotalSeconds > 20)
+        if (File.Exists(adbPath) && lastRunTimedOut && adbGiveUpUntil.Length == 0)
         {
-            bool wedged = !string.IsNullOrEmpty(lastRunTimedOut ? "1" : "") && lastRunTimedOut;
-            if (wedged)
-            {
-                RestartAdb(adbPath);
-                lastRunTimedOut = false;
-            }
+            RestartAdb(adbPath);
+            lastRunTimedOut = false;
         }
 
         // adb 调用有成本，6 秒查一次就够
@@ -519,6 +559,7 @@ public class PadCenter : Form
         if (d.Device.Length > 0)
         {
             string tail = (DateTime.Now - adbRestartedAt).TotalSeconds < 60 ? "（adb 已自动重启）" : "";
+            if (adbGiveUpUntil.Length > 0) tail = "（" + adbGiveUpUntil + "）";
             lines.Add(d.Reverse
                 ? "USB 设备|" + d.Device + "  ·  映射已建立" + tail + "|ok"
                 : "USB 设备|" + d.Device + "  ·  映射未建立" + tail + "|warn");
