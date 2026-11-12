@@ -267,6 +267,7 @@ def act_text(text):
 
 def handle_message(msg):
     """处理一条来自平板的 JSON 指令。"""
+    global _user_pause_at
     t = msg.get("t")
     if t == "m":
         act_move(msg.get("dx", 0), msg.get("dy", 0))
@@ -291,10 +292,14 @@ def handle_message(msg):
         act_zoom(int(msg.get("d") or 0))
     elif t == "dblstart":
         act_drag_start()
+    elif t == "mctl":
+        a = str(msg.get("a") or "")
+        if a == "playpause":
+            _user_pause_at = time.time()
+        media_control(a)
     elif t == "k":
         vk = int(msg.get("vk") or 0)
         if vk == 0xB3:                      # 播放/暂停键：记下来，别让换歌宽限期掩盖它
-            global _user_pause_at
             _user_pause_at = time.time()
         act_tap(vk)
     elif t == "ks":
@@ -991,6 +996,21 @@ def query_now():
         return _now_cache["data"]
 
     data = {"title": "", "artist": "", "status": "none"}
+
+    sm = smtc_fresh()
+    if sm:
+        t = (sm.get("title") or "").strip()
+        a = (sm.get("artist") or "").strip()
+        playing = (sm.get("status") or "").lower() == "playing"
+        _note_track(t, a)
+        pos = float(sm.get("pos") or 0)
+        data = {"title": t, "artist": a,
+                "status": "Playing" if playing else "Paused", "src": "smtc",
+                "pos": round(pos if pos > 0 else _clock_tick(t, playing), 2)}
+        _now_cache["t"] = now
+        _now_cache["data"] = data
+        return data
+
     try:
         raw, exe = player_window_title()
         if raw:
@@ -1059,6 +1079,52 @@ def set_play_mode(what, value):
     except Exception:
         pass
     return {"ok": False, "reason": "error"}
+
+
+MCTL_PS = PS_PRELUDE + r"""
+$act = $args[0]
+if ($null -eq $s) { '{"ok":false,"reason":"nosession"}'; exit }
+$ok = $false
+if ($act -eq 'playpause') { $ok = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
+elseif ($act -eq 'next') { $ok = Await ($s.TrySkipNextAsync()) ([bool]) }
+elseif ($act -eq 'prev') { $ok = Await ($s.TrySkipPreviousAsync()) ([bool]) }
+if ($ok) { '{"ok":true}' } else { '{"ok":false,"reason":"rejected"}' }
+"""
+
+
+def media_control(action):
+    """播放/暂停/上一首/下一首：优先用 SMTC 会话控制。
+
+    比发媒体键准：媒体键是给"当前处理它的窗口"的，
+    焦点跑到浏览器上时可能被浏览器吃掉。
+    没有会话或播放器拒绝，就退回媒体键。
+    """
+    vk = {"playpause": 0xB3, "next": 0xB0, "prev": 0xB1}.get(action)
+    if action not in ("playpause", "next", "prev"):
+        return {"ok": False, "reason": "bad_action"}
+
+    try:
+        script = _ps_script(MCTL_PS, "mctl")
+        if script:
+            out = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, action],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=6, creationflags=0x08000000,
+            ).stdout.strip()
+            for line in reversed(out.splitlines()):
+                line = line.strip()
+                if line.startswith("{") and line.endswith("}"):
+                    r = json.loads(line)
+                    if r.get("ok"):
+                        return {"ok": True, "via": "smtc"}
+                    break
+    except Exception:
+        pass
+
+    if vk:
+        act_tap(vk)
+        return {"ok": True, "via": "key"}
+    return {"ok": False}
 
 
 def seek_to(seconds):
@@ -1199,12 +1265,81 @@ def _meta_for(key, title, artist):
     return meta
 
 
+_smtc_lock = threading.Lock()
+_smtc = {"t": 0.0, "data": None}
+
+
+def smtc_info():
+    """同步问一次系统媒体控制（SMTC），失败返回 None。"""
+    script = _ps_script(MEDIA_PS, "media")
+    if not script:
+        return None
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=8, creationflags=0x08000000,
+        ).stdout.strip()
+    except Exception:
+        return None
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                return None
+    return None
+
+
+def _smtc_loop(stop):
+    """后台每 2 秒刷一次 SMTC 缓存。
+
+    单开线程是为了让 /now 保持毫秒级：PowerShell 启动本身就要 200ms 上下。
+    """
+    while not stop.wait(2.0):
+        try:
+            d = smtc_info()
+        except Exception:
+            d = None
+        with _smtc_lock:
+            _smtc["t"] = time.time()
+            _smtc["data"] = d
+
+
+def smtc_fresh(max_age=8.0):
+    """缓存里的 SMTC 结果；太旧或没歌名就当作没有。"""
+    with _smtc_lock:
+        d, t = _smtc["data"], _smtc["t"]
+    if not d or time.time() - t > max_age:
+        return None
+    if not (d.get("title") or "").strip():
+        return None
+    if (d.get("status") or "").lower() in ("none", "closed"):
+        return None
+    return d
+
+
 def _probe_player():
-    """问一次「现在放的是哪首」。窗口优先，拿不到再问系统媒体控制。"""
+    """问一次「现在放的是哪首」。SMTC 优先，拿不到再解析播放器窗口标题。"""
     data = {"title": "", "artist": "", "status": ""}
 
-    # 1) 本机播放器窗口：标题里有歌名，音频会话状态说明是否真在放
-    #    （网易云走这条，它不注册系统媒体控制）
+    # 0) 系统媒体控制：播放器上报的话最准，标题里不会拖「 - 网易云音乐」这类后缀
+    sm = smtc_fresh()
+    if sm:
+        playing = (sm.get("status") or "").lower() == "playing"
+        data = {"title": sm.get("title", ""), "artist": sm.get("artist", ""),
+                "status": "Playing" if playing else "Paused", "src": "smtc"}
+        if sm.get("dur"):
+            data["dur"] = round(float(sm["dur"]), 2)
+        pos = float(sm.get("pos") or 0)
+        if pos > 0:
+            data["pos"] = round(pos, 2)
+        else:
+            data["pos"] = round(_clock_tick(data["title"], playing), 2)
+        return data
+
+    # 1) 退回播放器窗口：标题里有歌名，音频会话状态说明是否真在放
     raw, exe = player_window_title()
     if raw:
         t, a = split_song_title(raw)
@@ -1998,6 +2133,10 @@ def main():
             f.write(f"{os.getpid()} {actual_port}")
     except OSError:
         pass
+
+    # 系统媒体控制轮询：单独线程，别让 PowerShell 启动拖慢 /now
+    _smtc_stop = threading.Event()
+    threading.Thread(target=_smtc_loop, args=(_smtc_stop,), daemon=True).start()
 
     try:
         srv.serve_forever()

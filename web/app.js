@@ -148,7 +148,12 @@
         setTimeout(() => { lastMedia = ''; pollMedia(true); }, 600);
         setTimeout(() => { lastMedia = ''; pollMedia(true); }, 2600);
       }
-      send({ t: 'k', vk: parseInt(b.dataset.media, 10) });   // 系统媒体键
+      // 播放控制优先走系统媒体控制（更准，焦点在别的窗口也有效）；
+      // 服务端如果拿不到会话会自动退回媒体键
+      const mkVk = parseInt(b.dataset.media, 10);
+      const mkAct = mkVk === 179 ? 'playpause' : mkVk === 176 ? 'next' : mkVk === 177 ? 'prev' : '';
+      if (mkAct) send({ t: 'mctl', a: mkAct });
+      else send({ t: 'k', vk: mkVk });
       b.classList.add('on');
       setTimeout(() => b.classList.remove('on'), 160);
     });
