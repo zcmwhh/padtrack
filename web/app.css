@@ -1157,9 +1157,14 @@ html.glass-light {
     background: transparent; border: none; padding: 0;
     transition: transform var(--t-fast) var(--ease-spring), background var(--t-fast) ease;
   }
-  .ti-app img { width: 26px; height: 26px; pointer-events: none;
+  .ti-app .ti-icon {
+    width: 26px; height: 26px; pointer-events: none;
+    background-repeat: no-repeat; background-position: center; background-size: contain;
     border-radius: 7px;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45));
+    /* 长按别触发系统菜单/选中 */
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  }
   .ti-app:active { transform: scale(.86); }
   .ti-app.active { background: rgba(62, 207, 142, .14); }
   .ti-app.active::after {
@@ -1226,6 +1231,10 @@ html.glass-light {
   .ci-track { flex: 1 1 auto; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
   .ci-track b { display: block; height: 100%; width: 0%; border-radius: 3px;
     background: linear-gradient(90deg, #4ade80, #22d3ee); transition: width .4s ease; }
+  .ci-track-gpu b { background: linear-gradient(90deg, #a78bfa, #60a5fa); }
+  .ci-mini { gap: 10px; justify-content: flex-start; }
+  .ci-mini em { font-variant-numeric: tabular-nums; color: rgba(226,236,246,.82); }
+  .ci-mini .ci-net { margin-left: auto; }
   .ci-net { margin-left: auto; font-size: 11px; }
 
   /* ---- 剪贴板 ---- */
@@ -1320,3 +1329,53 @@ html.glass-light {
   }
   .winmenu button:active { background: var(--glass-hover); }
   .winmenu button.danger { color: #ff9c9c; }
+
+
+  /* ================= 灵动岛设置面板 ================= */
+  .islandcfg {
+    position: fixed; inset: 0; z-index: 92; display: none;
+    background: rgba(4, 7, 10, .72);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  }
+  .islandcfg.on { display: flex; align-items: flex-end; justify-content: center; }
+  .cfgsheet {
+    width: min(96vw, 520px); max-height: 76vh; margin-bottom: 16px;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 14px; border-radius: 20px;
+    background: linear-gradient(180deg, var(--glass-top), var(--glass-bot));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--card-shadow-front);
+    animation: cfgIn .26s cubic-bezier(.32,1.25,.45,1);
+  }
+  @keyframes cfgIn { from { opacity: 0; transform: translateY(18px) scale(.98); } }
+  .cfghead { display: flex; align-items: center; justify-content: space-between; }
+  .cfghead span { font-size: 14px; font-weight: 600; color: var(--glass-text); }
+  .cfghead button {
+    height: 30px; padding: 0 14px; border-radius: 9px;
+    background: rgba(255, 255, 255, .1); border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 12.5px;
+  }
+  .cfglist { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+  /* 每行做成一张「卡片」的样子，像华为卡片堆叠那样能一眼看到全部卡片 */
+  .cfglist { gap: 8px; padding: 2px; }
+  .cfgrow {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 48px; padding: 8px 12px; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.04));
+    border: 1px solid rgba(255, 255, 255, .12);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .06);
+    transition: transform .18s var(--ease-spring), opacity .2s ease, border-color .2s ease;
+  }
+  .cfgrow:active { transform: scale(.985); }
+  .cfgrow.off { opacity: .45; }
+  .cfgrow b { flex: 1 1 auto; font-size: 13px; font-weight: 500; color: var(--glass-text); }
+  .cfgrow .cfgno { font-size: 11px; color: rgba(226,236,246,.4); width: 16px; }
+  .cfgrow button {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 13px; line-height: 1;
+  }
+  .cfgrow button:disabled { opacity: .25; }
+  .cfgrow .cfgtoggle { width: 44px; }
+  .cfgrow .cfgtoggle.on { background: rgba(74, 222, 128, .22); border-color: rgba(74, 222, 128, .5); color: #b7f7cd; }
+  .cfgtip { font-size: 11px; color: rgba(226, 236, 246, .42); text-align: center; padding-top: 2px; }

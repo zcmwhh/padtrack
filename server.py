@@ -1529,6 +1529,11 @@ class Handler(socketserver.BaseRequestHandler):
                     "rx": _sys_state["rx"],
                     "tx": _sys_state["tx"],
                     "up": _sys_state["up"],
+                    "gpu": _sys_state["gpu"],
+                    "gpuMem": _sys_state["gpuMem"],
+                    "gpuMemTotal": _sys_state["gpuMemTotal"],
+                    "gpuTemp": _sys_state["gpuTemp"],
+                    "cpuTemp": _sys_state["cpuTemp"],
                 }).encode("utf-8")
                 self._http(sock, 200, body, "application/json; charset=utf-8")
                 return
@@ -2858,7 +2863,8 @@ def clip_history(limit=6):
 # ---- 系统状态 ----
 _cpu_prev = {"idle": 0, "busy": 0, "t": 0.0}
 _net_prev = {"t": 0.0, "rx": 0, "tx": 0, "ok": False}
-_sys_state = {"cpu": 0.0, "mem": 0.0, "memUsed": 0, "memTotal": 0, "rx": 0, "tx": 0, "up": 0}
+_sys_state = {"cpu": 0.0, "mem": 0.0, "memUsed": 0, "memTotal": 0, "rx": 0, "tx": 0, "up": 0,
+              "gpu": -1, "gpuMem": 0, "gpuMemTotal": 0, "gpuTemp": -1, "cpuTemp": -1}
 
 
 class _FILETIME(ctypes.Structure):
@@ -2885,6 +2891,27 @@ def _cpu_sample():
     busy = max(0.0, min(1.0, 1.0 - di / dt))
     return round(busy * 100, 1)
 
+
+HWSENSOR_PS = r"""
+$ErrorActionPreference='SilentlyContinue'
+$out = [ordered]@{ gpu=''; gpuMem=''; gpuMemTotal=''; gpuTemp=''; cpuTemp='' }
+try {
+  $smi = & "$env:SystemRoot\System32\nvidia-smi.exe" --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>$null
+  if (-not $smi) { $smi = & nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>$null }
+  if ($smi) {
+    $p = ($smi | Select-Object -First 1).Split(',')
+    if ($p.Count -ge 4) {
+      $out.gpu = $p[0].Trim(); $out.gpuMem = $p[1].Trim()
+      $out.gpuMemTotal = $p[2].Trim(); $out.gpuTemp = $p[3].Trim()
+    }
+  }
+} catch {}
+try {
+  $t = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop | Select-Object -First 1
+  if ($t -and $t.CurrentTemperature) { $out.cpuTemp = [math]::Round($t.CurrentTemperature/10 - 273.15, 1) }
+} catch {}
+$out | ConvertTo-Json -Compress
+"""
 
 NET_PS = r"""
 $ErrorActionPreference='SilentlyContinue'
@@ -2919,6 +2946,45 @@ def _net_sample():
         pass
 
 
+def _hw_sample():
+    """GPU 占用/显存/温度 + CPU 温度。取不到就 -1。"""
+    script = _ps_script(HWSENSOR_PS, "hwsensor")
+    if not script:
+        return
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10, creationflags=0x08000000,
+        ).stdout.strip()
+        line = ""
+        for ln in reversed(out.splitlines()):
+            ln = ln.strip()
+            if ln.startswith("{"):
+                line = ln
+                break
+        if not line:
+            return
+        d = json.loads(line)
+
+        def num(v, default=-1):
+            try:
+                return float(str(v).strip())
+            except (TypeError, ValueError):
+                return default
+
+        g = num(d.get("gpu"))
+        _sys_state["gpu"] = int(g) if g >= 0 else -1
+        _sys_state["gpuMem"] = int(num(d.get("gpuMem"), 0))
+        _sys_state["gpuMemTotal"] = int(num(d.get("gpuMemTotal"), 0))
+        t = num(d.get("gpuTemp"))
+        _sys_state["gpuTemp"] = t if t > 0 else -1
+        c = num(d.get("cpuTemp"))
+        _sys_state["cpuTemp"] = c if c > 0 else -1
+    except Exception:
+        pass
+
+
 def _sys_loop():
     while True:
         try:
@@ -2934,6 +3000,7 @@ def _sys_loop():
             if time.time() - _sys_state.get("_net_t", 0.0) > 5.0:
                 _sys_state["_net_t"] = time.time()
                 _net_sample()
+                _hw_sample()
         except Exception:
             pass
         time.sleep(1.6)

@@ -475,9 +475,9 @@
     if (!b) {
       b = document.createElement('button');
       b.className = 'ti-app';
-      const img = document.createElement('img');
-      img.alt = '';
-      img.draggable = false;
+      // 用 div + background-image 而不是 <img>：安卓长按 <img> 会弹系统菜单「保存图片」
+      const img = document.createElement('i');
+      img.className = 'ti-icon';
       b.appendChild(img);
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -494,7 +494,10 @@
     const img = b.firstChild;
     const wantIcon = item.icon || '';
     const src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(wantIcon)}`;
-    if (img && img.getAttribute('src') !== src && wantIcon) img.setAttribute('src', src);
+    if (img && img.__src !== src && wantIcon) {
+      img.__src = src;
+      img.style.backgroundImage = `url("${src}")`;
+    }
     b.__item = item;
     b.dataset.h = item.h || 0;
     b.title = item.name || item.icon || '';
@@ -623,6 +626,10 @@
   const sysNetTxt = document.getElementById('sysNetTxt');
   const sysCpuBar = document.getElementById('sysCpuBar');
   const sysMemBar = document.getElementById('sysMemBar');
+  const sysGpuTxt = document.getElementById('sysGpuTxt');
+  const sysGpuBar = document.getElementById('sysGpuBar');
+  const sysVramTxt = document.getElementById('sysVramTxt');
+  const sysTempTxt = document.getElementById('sysTempTxt');
   let sysTimer = 0;
   let sysData = null;
 
@@ -645,9 +652,24 @@
     if (sysMemTxt) {
       const usedG = d.memUsed ? (d.memUsed / 1073741824).toFixed(1) : '—';
       const totalG = d.memTotal ? (d.memTotal / 1073741824).toFixed(0) : '—';
-      sysMemTxt.textContent = usedG + '/' + totalG + 'G';
+      sysMemTxt.textContent = '内存 ' + usedG + '/' + totalG + 'G';
     }
-    if (sysNetTxt) sysNetTxt.textContent = '↓' + fmtBps(d.rx) + '/s  ↑' + fmtBps(d.tx) + '/s';
+    const gpu = Number(d.gpu);
+    if (sysGpuTxt) sysGpuTxt.textContent = (gpu >= 0) ? Math.round(gpu) + '%' : '—';
+    if (sysGpuBar) sysGpuBar.style.width = (gpu >= 0 ? Math.min(100, gpu) : 0) + '%';
+    if (sysVramTxt) {
+      sysVramTxt.textContent = (d.gpuMemTotal > 0)
+        ? '显存 ' + (d.gpuMem / 1024).toFixed(1) + '/' + (d.gpuMemTotal / 1024).toFixed(0) + 'G'
+        : '显存 —';
+    }
+    if (sysTempTxt) {
+      const ct = Number(d.cpuTemp), gt = Number(d.gpuTemp);
+      const bits = [];
+      if (gt > 0) bits.push('GPU ' + Math.round(gt) + '°');
+      if (ct > 0) bits.push('CPU ' + Math.round(ct) + '°');
+      sysTempTxt.textContent = bits.length ? bits.join(' / ') : '温度 —';
+    }
+    if (sysNetTxt) sysNetTxt.textContent = '↓' + fmtBps(d.rx) + '/s';
     if (sysCpuBar) sysCpuBar.style.width = Math.min(100, cpu) + '%';
     if (sysMemBar) sysMemBar.style.width = Math.min(100, mem) + '%';
   }
@@ -968,8 +990,176 @@
   // tiIconFor 生成按钮时回调这里
   window.__tiHookLongPress = attachIconLongPress;
 
-  // 所有卡片挂上拖动
-  ISLAND_CARDS.forEach((c) => islandAttachDrag(c.el));
+
+  /* ==================================================================
+     灵动岛卡片管理（仿华为卡片堆叠设置）
+     入口：长按任意非任务栏卡片的一级菜单 → 展开「所有卡片」
+     可：上移/下移（滑动顺序）、显示/隐藏（存 localStorage）
+     ================================================================== */
+  const CFG_KEY = 'padtrack.island.prefs';
+  const CFG_NAMES = { music: '音乐播放器', tasks: '任务栏', sys: '系统状态', clip: '剪贴板', macro: '快捷按键' };
+  const cfgPanel = document.getElementById('islandCfg');
+  const cfgListEl = document.getElementById('cfgList');
+  const cfgDoneBtn = document.getElementById('cfgClose');
+
+  let cfgPrefs = { order: [], hidden: [] };
+  try {
+    const raw = localStorage.getItem(CFG_KEY);
+    if (raw) {
+      const o = JSON.parse(raw) || {};
+      if (Array.isArray(o.order)) cfgPrefs.order = o.order.filter((x) => typeof x === 'string');
+      if (Array.isArray(o.hidden)) cfgPrefs.hidden = o.hidden.filter((x) => typeof x === 'string');
+    }
+  } catch (_) {}
+
+  function cfgSave() {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(cfgPrefs)); } catch (_) {}
+  }
+
+  function cfgOrdered() {
+    const order = cfgPrefs.order;
+    return ISLAND_CARDS.slice().sort((a, b) => {
+      const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+      if (ia < 0 && ib < 0) return a.order - b.order;
+      if (ia < 0) return 1;
+      if (ib < 0) return -1;
+      return ia - ib;
+    });
+  }
+
+  function cfgApply() {
+    const hidden = new Set(cfgPrefs.hidden);
+    ISLAND_CARDS.forEach((c) => {
+      if (!c._avail) c._avail = c.available;
+      c.available = () => !hidden.has(c.id) && c._avail();
+    });
+    const ordered = cfgOrdered();
+    ISLAND_CARDS.length = 0;
+    ordered.forEach((c) => ISLAND_CARDS.push(c));
+    if (islandPos > ISLAND_CARDS.length - 1) islandPos = Math.max(0, ISLAND_CARDS.length - 1);
+    islandPaint(true);
+  }
+
+  function cfgRender() {
+    if (!cfgListEl) return;
+    cfgListEl.innerHTML = '';
+    const list = cfgOrdered();
+    list.forEach((card, i) => {
+      const hid = cfgPrefs.hidden.includes(card.id);
+      const row = document.createElement('div');
+      row.className = 'cfgrow' + (hid ? ' off' : '');
+      row.dataset.card = card.id;
+
+      const no = document.createElement('span');
+      no.className = 'cfgno';
+      no.textContent = String(i + 1);
+      row.appendChild(no);
+
+      const name = document.createElement('b');
+      name.textContent = CFG_NAMES[card.id] || card.id;
+      row.appendChild(name);
+
+      const up = document.createElement('button');
+      up.textContent = '↑';
+      up.disabled = i === 0;
+      up.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(i, -1); });
+      row.appendChild(up);
+
+      const down = document.createElement('button');
+      down.textContent = '↓';
+      down.disabled = i === list.length - 1;
+      down.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(i, 1); });
+      row.appendChild(down);
+
+      const tg = document.createElement('button');
+      tg.className = 'cfgtoggle' + (hid ? '' : ' on');
+      tg.textContent = hid ? '隐藏' : '显示';
+      tg.addEventListener('click', (e) => { e.stopPropagation(); cfgToggle(card.id); });
+      row.appendChild(tg);
+
+      cfgListEl.appendChild(row);
+    });
+  }
+
+  function cfgMove(index, delta) {
+    const ids = cfgOrdered().map((c) => c.id);
+    const to = index + delta;
+    if (to < 0 || to >= ids.length) return;
+    const [x] = ids.splice(index, 1);
+    ids.splice(to, 0, x);
+    cfgPrefs.order = ids;
+    cfgSave();
+    cfgApply();
+    cfgRender();
+  }
+
+  function cfgToggle(id) {
+    const hidden = new Set(cfgPrefs.hidden);
+    if (hidden.has(id)) {
+      hidden.delete(id);
+    } else {
+      const visible = ISLAND_CARDS.filter((c) => !hidden.has(c.id));
+      if (visible.length <= 1 && visible.some((c) => c.id === id)) {
+        flash('至少保留一张卡片');
+        return;
+      }
+      hidden.add(id);
+    }
+    cfgPrefs.hidden = [...hidden];
+    cfgSave();
+    cfgApply();
+    cfgRender();
+  }
+
+  function cfgOpen() {
+    if (!cfgPanel) return;
+    cfgRender();
+    cfgPanel.classList.add('on');
+    cfgPanel.setAttribute('aria-hidden', 'false');
+  }
+
+  function cfgClosePanel() {
+    if (!cfgPanel) return;
+    cfgPanel.classList.remove('on');
+    cfgPanel.setAttribute('aria-hidden', 'true');
+  }
+
+  if (cfgDoneBtn) cfgDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgClosePanel(); });
+  if (cfgPanel) {
+    cfgPanel.addEventListener('pointerdown', (e) => {
+      if (e.target === cfgPanel) cfgClosePanel();
+    });
+  }
+
+  // 长按卡片（任务栏卡除外，它长按是窗口菜单）
+  function attachCfgLongPress(el, id) {
+    if (!el || id === 'tasks') return;
+    let timer = 0, moved = false, sx = 0, sy = 0;
+    el.addEventListener('pointerdown', (e) => {
+      moved = false;
+      sx = e.clientX; sy = e.clientY;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (moved) return;
+        islandSwallowClick = performance.now() + 500;
+        if (navigator.vibrate) navigator.vibrate(14);
+        cfgOpen();
+      }, 560);
+    }, { passive: true });
+    el.addEventListener('pointermove', (e) => {
+      if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) {
+        moved = true;
+        clearTimeout(timer);
+      }
+    }, { passive: true });
+    el.addEventListener('pointerup', () => clearTimeout(timer));
+    el.addEventListener('pointercancel', () => clearTimeout(timer));
+    el.addEventListener('pointerleave', () => clearTimeout(timer));
+  }
+
+  // 应用保存过的显隐/顺序，挂拖动与长按
+  cfgApply();
+  ISLAND_CARDS.forEach((c) => { islandAttachDrag(c.el); attachCfgLongPress(c.el, c.id); });
   islandPaint(false);
   console.info('[island] 已注册卡片:', ISLAND_CARDS.map((c) => c.id).join(', '));
 
