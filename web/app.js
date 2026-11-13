@@ -2913,37 +2913,154 @@
     if (navigator.vibrate) navigator.vibrate(8);
   }
 
+  // 造一个按键（两套布局共用，保证外观一模一样）
+  function makeKeyBtn(key, bindClick) {
+    const b = document.createElement('button');
+    b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
+    if (key.w) b.style.flexGrow = String(key.w);
+    if (key.icon) {
+      b.className += ' icon';
+      b.innerHTML = KEY_ICONS[key.icon] || '';
+    } else {
+      b.textContent = key.label;
+    }
+    if (b.classList.contains('capskey')) {
+      const led = document.createElement('span');
+      led.className = 'capsled';
+      b.appendChild(led);
+      b.classList.toggle('capson', capsOn);
+    }
+    // 右 Shift 单独标记：点一下切换输入法中英文
+    if (key.vk === 0x10 && b.classList.contains('mod')
+        && !b.classList.contains('shiftl')) b.classList.add('shiftr');
+    b.dataset.vk = key.vk;
+    if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
+    return b;
+  }
+
   function renderKeys(container, bindClick) {
     container.innerHTML = '';
     LAYER_MAIN.forEach((row) => {
       const r = document.createElement('div');
       r.className = 'kbrow';
       if (row.h) r.style.flexGrow = String(row.h);
-      row.keys.forEach((key) => {
-        const b = document.createElement('button');
-        b.className = 'kbkey' + (key.cls ? ' ' + key.cls : '');
-        if (key.w) b.style.flexGrow = String(key.w);
-        if (key.icon) {
-          b.className += ' icon';
-          b.innerHTML = KEY_ICONS[key.icon] || '';
-        } else {
-          b.textContent = key.label;
-        }
-        if (b.classList.contains('capskey')) {
-          const led = document.createElement('span');
-          led.className = 'capsled';
-          b.appendChild(led);
-          b.classList.toggle('capson', capsOn);
-        }
-        // 右 Shift 单独标记：点一下切换输入法中英文
-        if (key.vk === 0x10 && b.classList.contains('mod')
-            && !b.classList.contains('shiftl')) b.classList.add('shiftr');
-        b.dataset.vk = key.vk;
-        if (bindClick) b.addEventListener('click', () => pressKey(key.vk, b));
-        r.appendChild(b);
-      });
+      row.keys.forEach((key) => r.appendChild(makeKeyBtn(key, bindClick)));
       container.appendChild(r);
     });
+  }
+
+  /* ---------- 竖屏分体键盘（左右两半，每行 5 键，键宽翻倍） ---------- */
+  let kfLayer = 'abc';            // 'abc' | 'num'
+  const kfKeyMap = new Map();     // 标签 → 原键对象（复用 LAYER_MAIN 里的定义）
+  LAYER_MAIN.forEach((row) => row.keys.forEach((k) => {
+    if (k.label && !kfKeyMap.has(k.label)) kfKeyMap.set(k.label, k);
+  }));
+
+  const KF_SPLIT = {
+    abc: {
+      left: [['Q', 'W', 'E', 'R', 'T'], ['A', 'S', 'D', 'F', 'G'], ['Z', 'X', 'C', 'V', 'B']],
+      right: [['Y', 'U', 'I', 'O', 'P'], ['H', 'J', 'K', 'L', ';:'], ['N', 'M', ',<', '.>', '/?']],
+      lBottom: ['Shift', '空格'],
+      rBottom: ['backspace', 'enter'],
+    },
+    num: {
+      left: [['1!', '2@', '3#', '4$', '5%'], ['6^', '7&', '8*', '9(', '0)'], ['-_', '=+', '[{', ']}', '\\|']],
+      right: [['Esc', 'F1', 'F2', 'F3', 'F4'], ['F5', 'F6', 'F7', 'F8', 'F9'], ['F10', 'F11', 'F12', 'Tab', 'Del']],
+      lBottom: ['Caps', '空格'],
+      rBottom: ['backspace', 'enter'],
+    },
+  };
+
+  // 底部功能条：切层 + 修饰键 + 方向键
+  const KF_FNBAR = ['123', 'Ctrl', 'Win', 'Alt', '←', '↓', '↑', '→'];
+
+  function kfSplitKey(label) {
+    if (label === '空格') return { label: '', vk: 0x20, w: 6.6, cls: 'space', icon: 'space' };
+    if (label === 'backspace') return { label: '', vk: 0x08, w: 2.2, cls: 'fn', icon: 'backspace' };
+    if (label === 'enter') return { label: '', vk: 0x0D, w: 2.3, cls: 'fn', icon: 'enter' };
+    const k = kfKeyMap.get(label);
+    return k || { label, vk: 0 };
+  }
+
+  function renderKfSplit() {
+    const conf = KF_SPLIT[kfLayer];
+    kfPadEl.innerHTML = '';
+    const cols = document.createElement('div');
+    cols.className = 'kbcols';
+    const main = document.createElement('div');
+    main.className = 'kfmain';
+    cols.appendChild(main);
+
+    [['left', conf.left, conf.lBottom], ['right', conf.right, conf.rBottom]].forEach(([side, rows, bottom]) => {
+      const col = document.createElement('div');
+      col.className = 'kbcol';
+      rows.forEach((labels) => {
+        const r = document.createElement('div');
+        r.className = 'kbrow';
+        labels.forEach((lb) => r.appendChild(makeKeyBtn(kfSplitKey(lb), false)));
+        col.appendChild(r);
+      });
+      const br = document.createElement('div');
+      br.className = 'kbrow kbbottom';
+      bottom.forEach((lb) => br.appendChild(makeKeyBtn(kfSplitKey(lb), false)));
+      col.appendChild(br);
+      main.appendChild(col);
+    });
+
+    const fnbar = document.createElement('div');
+    fnbar.className = 'kbrow kbfnbar';
+    KF_FNBAR.forEach((lb) => {
+      if (lb === '123') {
+        const b = document.createElement('button');
+        b.className = 'kbkey fn kblayer';
+        b.textContent = (kfLayer === 'abc') ? '123' : 'ABC';
+        b.dataset.vk = '';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          kfLayer = (kfLayer === 'abc') ? 'num' : 'abc';
+          renderKf();
+        });
+        fnbar.appendChild(b);
+      } else {
+        fnbar.appendChild(makeKeyBtn(kfSplitKey(lb), false));
+      }
+    });
+
+    cols.appendChild(fnbar);
+    kfPadEl.appendChild(cols);
+  }
+
+  // 竖屏用分体，横屏用原来的整块键盘。
+  // 判据优先用键盘容器自身的宽高比（面板显示后最准），拿不到再退回 window。
+  function kfIsPortrait() {
+    const r = kfPadEl ? kfPadEl.getBoundingClientRect() : null;
+    if (r && r.width > 0 && r.height > 0) return r.height > r.width * 1.15;
+    return window.innerHeight > window.innerWidth;
+  }
+
+  let kfPending = 0;
+
+  function renderKf(force) {
+    if (!kfPadEl) return;
+    const want = kfIsPortrait();
+    const has = kfPadEl.classList.contains('split');
+    if (!force && want === has && kfPadEl.children.length) return;
+    if (want) {
+      kfPadEl.classList.add('split');
+      renderKfSplit();
+      const nub = document.getElementById('kfNub');
+      if (nub) nub.style.display = 'none';
+    } else {
+      kfPadEl.classList.remove('split');
+      renderKeys(kfPadEl, false);      // 注意：这里必须是 renderKeys，不能是 renderKf（会递归）
+      const nub = document.getElementById('kfNub');
+      if (nub) nub.style.display = '';
+    }
+  }
+
+  function scheduleKf() {
+    clearTimeout(kfPending);
+    kfPending = setTimeout(() => renderKf(true), 180);
   }
 
   // 键区按指针逐个处理：这样两根手指同时按两个键都能触发。
@@ -2988,6 +3105,8 @@
   }
 
   renderAll();
+  window.addEventListener('orientationchange', scheduleKf);
+  window.addEventListener('resize', scheduleKf);
   paintShiftLock();
   paintCaps();
   syncKeyLock();
@@ -3513,7 +3632,10 @@
     if (KB_MODES.includes(name)) {
       try { localStorage.setItem(KB_STORE, name); } catch (_) {}
     }
-    if (name === 'full') setTimeout(() => { try { applySavedNub(); } catch (_) {} }, 60);
+    if (name === 'full') setTimeout(() => {
+      try { applySavedNub(); } catch (_) {}
+      try { renderKf(true); } catch (_) {}
+    }, 60);
     clearSticky();
     document.querySelectorAll('.modebar').forEach((bar) => {
       bar.querySelectorAll('button').forEach((b) => {

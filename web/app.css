@@ -1433,3 +1433,39 @@ html.glass-light {
     border-color: rgba(74, 222, 128, .45);
     color: #b7f7cd;
   }
+  /* ================= 竖屏分体键盘（左右两半） ================= */
+  /* 通用规则里有 .kbrow{flex:1} 和 .kbkey{height:auto}，这里必须更具体地钉死尺寸 */
+  #kfPad.split {
+    justify-content: flex-end;      /* 贴着下方，拇指更够得着 */
+    padding-bottom: 3.5vh;
+  }
+  #kfPad.split .kbcols {
+    flex: 0 0 auto;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 12px; width: 100%;
+  }
+  #kfPad.split .kfmain {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;          /* 行高由内容决定，别再写死 grid-auto-rows */
+    gap: 10px 26px;
+  }
+  #kfPad.split .kbcol {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #kfPad.split .kbcol .kbrow {
+    flex: 0 0 96px; height: 96px;
+  }
+  #kfPad.split .kbfnbar {
+    flex: 0 0 46px; height: 46px;
+    display: flex; gap: 6px;
+  }
+  #kfPad.split .kbfnbar .kbkey {
+    flex: 1 1 0; height: 46px; font-size: 13px;
+  }
+  #kfPad.split .kbfnbar .kbkey.kblayer {
+    background: rgba(62, 207, 142, .16);
+    border-color: rgba(62, 207, 142, .4);
+    color: #9fe7c0;
+  }
