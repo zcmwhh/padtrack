@@ -1335,63 +1335,67 @@ html.glass-light {
   .winmenu button:active { background: var(--glass-hover); }
   .winmenu button.danger { color: #ff9c9c; }
 
-  /* ================= 灵动岛设置：卡片堆叠展开 ================= */
+  /* ================= 灵动岛设置：扑克摊牌 ================= */
   .islandcfg {
     position: fixed; inset: 0; z-index: 92; display: none;
     background: rgba(3, 5, 8, .52);
     backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
   }
   .islandcfg.on { display: block; }
-  .cfgstage { position: absolute; inset: 0; }
+  .fanstage { position: absolute; inset: 0; }
 
-  /* 每一行 = 一张卡 + 右侧控制；整行用 transform 定位，重排时只改 transform */
-  .cfgrow {
+  /* 摊开的牌 = 灵动岛同款卡片（尺寸/玻璃/圆角全部复用 .island-card） */
+  .fanstage .island-card {
     position: absolute; left: 50%; top: 50%;
-    width: min(88vw, 580px); height: 108px;
-    margin-left: calc(min(88vw, 580px) / -2 + 56px);
-    margin-top: -54px;
-    transition: transform .52s cubic-bezier(.32, 1.18, .4, 1), opacity .3s ease;
-    will-change: transform, opacity;
-  }
-
-  /* 卡片本体 */
-  .cfgcard {
-    position: absolute; inset: 0 124px 0 0;
-    display: flex; flex-direction: column; justify-content: flex-start; gap: 2px;
-    padding: 17px 18px 0;
-    border-radius: 18px;
-    /* 要够实：叠起来时下层的文字不能透上来 */
-    background: linear-gradient(180deg, rgba(32, 41, 52, .985), rgba(15, 20, 27, .99));
-    border: 1px solid rgba(255, 255, 255, .14);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .07);
+    margin-left: calc(var(--card-w) / -2);
+    margin-top: calc(var(--card-h) / -2);
+    width: var(--card-w); height: var(--card-h);
+    opacity: 1; pointer-events: auto;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px;
     overflow: hidden;
+    transition: transform .5s cubic-bezier(.32, 1.18, .4, 1), opacity .3s ease, box-shadow .2s ease;
+    will-change: transform;
   }
-  .cfgcard b { font-size: 15px; font-weight: 600; color: var(--glass-text); }
-  .cfgcard i {
-    font-style: normal; font-size: 12px; color: rgba(226, 236, 246, .52);
+  .fanstage .island-card.dragging {
+    transition: box-shadow .2s ease;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+  }
+  .fanstage .island-card.off { opacity: .38; }
+  .fanstage .island-card.off .fan-title::after {
+    content: '（隐藏）'; font-size: 10px; opacity: .7; margin-left: 4px;
+  }
+  .fan-title {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 12.5px; font-weight: 600; color: var(--glass-text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .cfgrow.off .cfgcard { opacity: .38; border-style: dashed; }
+  .fan-sub {
+    flex: none; max-width: 46%;
+    font-size: 10.5px; color: rgba(226, 236, 246, .5);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
-  /* 右侧控制 */
-  .cfgctrls {
-    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
-    display: flex; align-items: center; gap: 7px;
+  /* 右侧弹出的显隐菜单 */
+  .fanpop {
+    position: absolute; display: none; z-index: 95;
+    padding: 6px; border-radius: 14px;
+    background: linear-gradient(180deg, var(--glass-top), var(--glass-bot));
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--card-blur); -webkit-backdrop-filter: var(--card-blur);
+    box-shadow: var(--card-shadow-front);
   }
-  .cfgctrls button {
-    width: 34px; height: 34px; border-radius: 11px;
-    background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-border);
-    color: var(--glass-text); font-size: 14px; line-height: 1;
-    transition: background .15s ease, transform .15s var(--ease-spring), opacity .15s ease;
+  .fanpop.on { display: block; animation: fanPopIn .2s var(--ease-spring); }
+  @keyframes fanPopIn { from { opacity: 0; transform: translateY(-4px) scale(.96); } }
+  .fanpop button {
+    display: block; width: 100%; min-width: 108px; height: 34px; padding: 0 12px;
+    border-radius: 9px; background: transparent; border: none;
+    color: var(--glass-text); font-size: 12.5px; text-align: left;
+    white-space: nowrap;
   }
-  .cfgctrls button:active { background: var(--glass-hover); transform: scale(.9); }
-  .cfgctrls button:disabled { opacity: .2; }
-  .cfgctrls .cfgtoggle { width: 52px; font-size: 12px; }
-  .cfgctrls .cfgtoggle.on {
-    background: rgba(74, 222, 128, .18);
-    border-color: rgba(74, 222, 128, .45);
-    color: #b7f7cd;
-  }
+  .fanpop button:active { background: var(--glass-hover); }
+  .fanpop button.danger { color: #ff9c9c; }
 
   .cfgdone {
     position: absolute; right: 18px; top: calc(14px + env(safe-area-inset-top));

@@ -1032,7 +1032,6 @@
   const CFG_KEY = 'padtrack.island.prefs';
   const CFG_NAMES = { music: '音乐播放器', tasks: '任务栏', sys: '系统状态', clip: '剪贴板', macro: '快捷按键' };
   const cfgPanel = document.getElementById('islandCfg');
-  const cfgStage = document.getElementById('cfgStage');
   const cfgDoneBtn = document.getElementById('cfgClose');
 
   let cfgPrefs = { order: [], hidden: [] };
@@ -1073,137 +1072,202 @@
     islandPaint(true);
   }
 
-  // 舞台里每张卡一个 .cfgrow（卡本体 + 右侧控制）
-  const cfgRows = new Map();      // id → row 元素
-  let cfgBuilt = false;
+  // ===== 扑克摊牌：摊开的牌就是灵动岛同款卡片 =====
+  const fanStage = document.getElementById('fanStage');
+  const fanPop = document.getElementById('fanPop');
+  const FAN_STEP = 46;              // 每张卡错开的高度（卡高 48，所以略重叠）
+  const fanMap = new Map();         // id → 卡片元素
+  let fanBuilt = false;
+  let fanDrag = null;
+  let fanPopFor = '';
 
   function cfgSubtitle(id) {
     if (id === 'music') {
       const t = document.getElementById('musicTitle');
-      return (t && t.textContent && t.textContent !== '—') ? t.textContent : '当前没有播放';
+      return (t && t.textContent && t.textContent !== '—') ? t.textContent : '未在播放';
     }
-    if (id === 'tasks') return '切窗口 · 贴边 · 启动程序';
+    if (id === 'tasks') return '切窗口 · 贴边 · 启动';
     if (id === 'sys') {
       const c = document.getElementById('sysCpu');
-      return c ? ('CPU ' + c.textContent + ' · 内存 ' + document.getElementById('sysMem').textContent) : 'CPU / GPU / 温度';
+      const m = document.getElementById('sysMem');
+      return c ? ('CPU ' + c.textContent + ' 内存 ' + m.textContent) : 'CPU / GPU';
     }
-    if (id === 'clip') return '电脑剪贴板 · 点一下复制到平板';
-    if (id === 'macro') return '复制 粘贴 撤销 保存  Tab 回车 Esc';
+    if (id === 'clip') return '电脑剪贴板';
+    if (id === 'macro') return '复制 粘贴 撤销';
     return '';
   }
 
-  function cfgBuild() {
-    if (cfgBuilt || !cfgStage) return;
-    cfgBuilt = true;
+  function fanBuild() {
+    if (fanBuilt || !fanStage) return;
+    fanBuilt = true;
     ISLAND_CARDS.forEach((card) => {
-      const row = document.createElement('div');
-      row.className = 'cfgrow';
-      row.dataset.card = card.id;
+      const el = document.createElement('div');
+      el.className = 'island-card';
+      el.dataset.card = card.id;
 
-      const cardEl = document.createElement('div');
-      cardEl.className = 'cfgcard';
-      const name = document.createElement('b');
-      name.textContent = CFG_NAMES[card.id] || card.id;
-      const sub = document.createElement('i');
-      sub.className = 'cfgsub';
-      cardEl.appendChild(name);
-      cardEl.appendChild(sub);
-      row.appendChild(cardEl);
+      const t = document.createElement('div');
+      t.className = 'fan-title';
+      t.textContent = CFG_NAMES[card.id] || card.id;
 
-      const ctrls = document.createElement('div');
-      ctrls.className = 'cfgctrls';
+      const sub = document.createElement('div');
+      sub.className = 'fan-sub';
 
-      const up = document.createElement('button');
-      up.textContent = '↑';
-      up.dataset.act = 'up';
-      const down = document.createElement('button');
-      down.textContent = '↓';
-      down.dataset.act = 'down';
-      const tg = document.createElement('button');
-      tg.className = 'cfgtoggle';
-      tg.dataset.act = 'toggle';
+      el.appendChild(t);
+      el.appendChild(sub);
 
-      ctrls.appendChild(up);
-      ctrls.appendChild(down);
-      ctrls.appendChild(tg);
-      row.appendChild(ctrls);
+      el.addEventListener('pointerdown', (e) => fanPressStart(e, card.id));
+      el.addEventListener('click', (e) => e.stopPropagation());
 
-      // 点卡片本身 = 选中这张卡（关掉面板并把它切到前面）
-      cardEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const live = islandLive();
-        const idx = live.findIndex((c) => c.id === card.id);
-        if (idx >= 0) {
-          islandPos = idx;
-          islandPaint(true);
-        }
-        cfgClosePanel();
-      });
-
-      up.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, -1); });
-      down.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, 1); });
-      tg.addEventListener('click', (e) => { e.stopPropagation(); cfgToggle(card.id); });
-
-      cfgStage.appendChild(row);
-      cfgRows.set(card.id, row);
+      fanStage.appendChild(el);
+      fanMap.set(card.id, el);
     });
+
+    window.addEventListener('pointermove', fanPressMove, true);
+    window.addEventListener('pointerup', fanPressEnd, true);
+    window.addEventListener('pointercancel', fanPressEnd, true);
   }
 
-  // 只改 transform，靠 CSS transition 做动画（重排也是同一个动画）
-  function cfgLayout(animate) {
-    const list = cfgOrdered();
-    const step = 74;                     // 每张卡错开 74px（卡高 108，露 74px）
-    const h = 108;
-    const total = h + (list.length - 1) * step;
-
-    list.forEach((card, i) => {
-      const row = cfgRows.get(card.id);
-      if (!row) return;
-      const y = i * step - total / 2 + h / 2;
-      row.style.zIndex = String(10 + i);
-      if (animate) {
-        row.style.transitionDelay = (i * 38) + 'ms';
-        requestAnimationFrame(() => {
-          row.style.transform = `translate3d(0, ${y}px, 0)`;
-          row.style.opacity = '1';
-          setTimeout(() => { row.style.transitionDelay = '0ms'; }, 600 + i * 38);
-        });
-      } else {
-        row.style.transform = `translate3d(0, ${y}px, 0)`;
-        row.style.opacity = '1';
-      }
-    });
-
-    // 控制按钮状态 + 副标题
-    list.forEach((card, i) => {
-      const row = cfgRows.get(card.id);
-      if (!row) return;
-      const hid = cfgPrefs.hidden.includes(card.id);
-      row.classList.toggle('off', hid);
-      const up = row.querySelector('[data-act="up"]');
-      const down = row.querySelector('[data-act="down"]');
-      const tg = row.querySelector('[data-act="toggle"]');
-      if (up) up.disabled = i === 0;
-      if (down) down.disabled = i === list.length - 1;
-      if (tg) {
-        tg.textContent = hid ? '隐藏' : '显示';
-        tg.classList.toggle('on', !hid);
-      }
-      const sub = row.querySelector('.cfgsub');
-      if (sub) sub.textContent = cfgSubtitle(card.id);
-    });
+  // 每张卡的目标 Y（以整组居中）
+  function fanTargetY(i, n) {
+    const offset = -((n - 1) * FAN_STEP) / 2;
+    return offset + i * FAN_STEP;
   }
 
-  function cfgMove(id, delta) {
+  function fanLayout(animate, delayBase) {
     const ids = cfgOrdered().map((c) => c.id);
-    const at = ids.indexOf(id);
-    const to = at + delta;
-    if (at < 0 || to < 0 || to >= ids.length) return;
-    ids.splice(to, 0, ids.splice(at, 1)[0]);
-    cfgPrefs.order = ids;
-    cfgSave();
-    cfgApply();
-    cfgLayout(true);          // 只改 transform，位置会自己滑过去
+    const n = ids.length;
+    ids.forEach((id, i) => {
+      const el = fanMap.get(id);
+      if (!el) return;
+      const hid = cfgPrefs.hidden.includes(id);
+      el.classList.toggle('off', hid);
+      el.style.zIndex = String(20 + i);
+      const sub = el.querySelector('.fan-sub');
+      if (sub) sub.textContent = cfgSubtitle(id);
+      // 从「叠在中间 + 透明」的初始态恢复可见，否则摊开也看不见
+      el.style.opacity = '1';
+      if (fanDrag && fanDrag.id === id) return;   // 正在拖的那张不动
+
+      if (animate) {
+        const d = (delayBase || 0) + i * 85;
+        el.style.transitionDelay = d + 'ms';
+        requestAnimationFrame(() => {
+          el.style.transform = `translate3d(0, ${fanTargetY(i, n)}px, 0)`;
+        });
+        setTimeout(() => { el.style.transitionDelay = '0ms'; }, d + 700);
+      } else {
+        el.style.transitionDelay = '0ms';
+        el.style.transform = `translate3d(0, ${fanTargetY(i, n)}px, 0)`;
+      }
+    });
+  }
+
+  // ---------- 长按拖动排序 ----------
+  function fanPressStart(e, id) {
+    if (!el_ok(e)) return;
+    const el = fanMap.get(id);
+    if (!el) return;
+    const startY = e.clientY;
+    const n = cfgOrdered().length;
+    const idx = cfgOrdered().findIndex((c) => c.id === id);
+    const baseY = fanTargetY(idx, Math.max(1, n));
+    const timer = setTimeout(() => {
+      fanDrag = { id, startY, baseY, el, moved: false, lastClientY: startY };
+      el.classList.add('dragging');
+      el.style.transition = 'none';
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 420);
+    fanDrag = null;
+    el.__press = { timer, startY, id };
+  }
+
+  function el_ok(e) {
+    return e.pointerType !== 'mouse' || e.buttons === 1;
+  }
+
+  function fanPressMove(e) {
+    // 还没进入拖动：移动超过阈值就取消长按
+    for (const el of fanMap.values()) {
+      if (el.__press) {
+        if (Math.abs(e.clientY - el.__press.startY) > 8) {
+          clearTimeout(el.__press.timer);
+          el.__press = null;
+        }
+      }
+    }
+    if (!fanDrag) return;
+    const dy = e.clientY - fanDrag.startY;
+    fanDrag.lastClientY = e.clientY;
+    if (Math.abs(dy) > 3) fanDrag.moved = true;
+    fanDrag.el.style.transform = `translate3d(0, ${fanDrag.baseY + dy}px, 0)`;
+  }
+
+  function fanPressEnd(e) {
+    // 清掉所有未触发的长按计时器
+    for (const el of fanMap.values()) {
+      if (el.__press) {
+        clearTimeout(el.__press.timer);
+        el.__press = null;
+      }
+    }
+    if (!fanDrag) return;
+    const drag = fanDrag;
+    fanDrag = null;
+    drag.el.classList.remove('dragging');
+    drag.el.style.transition = '';
+
+    // 计算落点索引
+    const ids = cfgOrdered().map((c) => c.id);
+    const n = ids.length;
+    const from = ids.indexOf(drag.id);
+    const centerY = drag.baseY + (drag.lastClientY - drag.startY);
+    const offset = -((n - 1) * FAN_STEP) / 2;
+    let to = Math.round((centerY - offset) / FAN_STEP);
+    to = Math.max(0, Math.min(n - 1, to));
+
+    if (to !== from) {
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      cfgPrefs.order = ids;
+      cfgSave();
+      cfgApply();
+    }
+    fanLayout(true);
+
+    // 松手后：右侧弹出「是否显示」
+    setTimeout(() => fanShowPop(drag.id), 160);
+  }
+
+  // ---------- 右侧显隐菜单 ----------
+  function fanShowPop(id) {
+    if (!fanPop) return;
+    const el = fanMap.get(id);
+    if (!el) return;
+    const hid = cfgPrefs.hidden.includes(id);
+    fanPopFor = id;
+    fanPop.innerHTML = '';
+
+    const b = document.createElement('button');
+    b.textContent = hid ? '恢复显示这张卡' : '不再显示这张卡';
+    b.className = hid ? '' : 'danger';
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cfgToggle(id);
+      fanLayout(false);
+      fanHidePop();
+    });
+    fanPop.appendChild(b);
+
+    const r = el.getBoundingClientRect();
+    fanPop.classList.add('on');
+    const pw = fanPop.offsetWidth || 120;
+    const left = Math.min(window.innerWidth - pw - 10, r.right + 10);
+    fanPop.style.left = left + 'px';
+    fanPop.style.top = Math.max(10, r.top - 4) + 'px';
+  }
+
+  function fanHidePop() {
+    fanPopFor = '';
+    if (fanPop) fanPop.classList.remove('on');
   }
 
   function cfgToggle(id) {
@@ -1221,42 +1285,65 @@
     cfgPrefs.hidden = [...hidden];
     cfgSave();
     cfgApply();
-    cfgLayout(false);
   }
 
+  // ---------- 打开 / 关闭 ----------
   function cfgOpen() {
     if (!cfgPanel) return;
-    cfgBuild();
-    // 先全部叠到中间（合起来），再动画铺开
-    cfgRows.forEach((row) => {
-      row.style.transitionDelay = '0ms';
-      row.style.transform = 'translate3d(0, 0, 0) scale(.92)';
-      row.style.opacity = '0';
+    fanBuild();
+    fanHidePop();
+    // 灵动岛先自动翻到第一张卡
+    islandPos = 0;
+    islandPaint(true);
+
+    // 所有牌先叠在灵动岛的位置（同一处），再一张张向下摊开
+    const ids = cfgOrdered().map((c) => c.id);
+    const n = ids.length;
+    ids.forEach((id) => {
+      const el = fanMap.get(id);
+      if (!el) return;
+      el.style.transition = 'none';
+      el.style.transitionDelay = '0ms';
+      el.style.transform = `translate3d(0, ${fanTargetY(0, n)}px, 0) scale(.96)`;
+      el.style.opacity = '0';
+      const sub = el.querySelector('.fan-sub');
+      if (sub) sub.textContent = cfgSubtitle(id);
+      el.classList.toggle('off', cfgPrefs.hidden.includes(id));
     });
+
     cfgPanel.classList.add('on');
     cfgPanel.setAttribute('aria-hidden', 'false');
-    void cfgPanel.offsetWidth;          // 强制回流，保证有起始态
-    cfgLayout(true);
+    void cfgPanel.offsetWidth;
+    ids.forEach((id) => {
+      const el = fanMap.get(id);
+      if (el) el.style.transition = '';
+    });
+    fanLayout(true, 120);
   }
 
   function cfgClosePanel() {
     if (!cfgPanel) return;
-    // 收回中间再关闭
-    cfgRows.forEach((row) => {
-      row.style.transitionDelay = '0ms';
-      row.style.transform = 'translate3d(0, 0, 0) scale(.94)';
-      row.style.opacity = '0';
+    fanHidePop();
+    const n = cfgOrdered().length;
+    fanMap.forEach((el) => {
+      el.style.transition = 'transform .34s cubic-bezier(.4,0,.6,1), opacity .28s ease';
+      el.style.transitionDelay = '0ms';
+      el.style.transform = `translate3d(0, ${fanTargetY(0, n)}px, 0) scale(.94)`;
+      el.style.opacity = '0';
     });
     setTimeout(() => {
       cfgPanel.classList.remove('on');
       cfgPanel.setAttribute('aria-hidden', 'true');
-    }, 240);
+    }, 300);
   }
 
   if (cfgDoneBtn) cfgDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgClosePanel(); });
   if (cfgPanel) {
     cfgPanel.addEventListener('pointerdown', (e) => {
-      if (e.target === cfgPanel || e.target === cfgStage) cfgClosePanel();
+      if (e.target === cfgPanel || e.target === fanStage) {
+        if (fanPopFor) { fanHidePop(); return; }
+        cfgClosePanel();
+      }
     });
   }
 
