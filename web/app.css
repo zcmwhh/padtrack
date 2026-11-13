@@ -168,6 +168,7 @@ html.glass-light {
     top: calc(10px + env(safe-area-inset-top));
     left: 50%;
     touch-action: none;
+    width: var(--card-w);
     height: var(--card-h);
     border-radius: var(--card-r);
     padding: var(--card-pad);
@@ -1173,7 +1174,9 @@ html.glass-light {
   .ti-app.ghost img { opacity: .5; }
 
   /* 二级菜单 */
-  #taskIsland.l2 { width: min(94vw, 470px); height: var(--card-h2); border-radius: var(--card-r); padding: 0 14px; }
+  /* 任何灵动岛卡片进入二级都用这套尺寸 */
+  #taskIsland.l2,
+  .island-card.l2 { width: min(94vw, 470px); height: var(--card-h2); border-radius: var(--card-r); padding: 0 14px; }
   #taskIsland.l2 .ti-grid { touch-action: pan-x; }
   #taskIsland.l2 .ti-l1 { display: none; }
   .ti-grid {
@@ -1188,3 +1191,132 @@ html.glass-light {
   /* 一级/二级切换：内容淡入淡出，避免硬切 */
   .ti-l2 { opacity: 0; transition: opacity .22s ease; }
   #taskIsland.l2 .ti-l2 { opacity: 1; }
+
+  /* ================= 新卡片公用内部结构 ================= */
+  .ci-l1, .ci-l2 {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 10px;
+    transition: opacity .26s ease, transform .3s cubic-bezier(.32,1.25,.45,1);
+  }
+  .ci-l2 { opacity: 0; pointer-events: none; transform: translateX(8px); padding: 0 14px; }
+  .island-card.l2 .ci-l1 { opacity: 0; pointer-events: none; }
+  .island-card.l2 .ci-l2 { opacity: 1; pointer-events: auto; transform: none; }
+
+  .ci-ico {
+    flex: none; width: 30px; height: 30px; border-radius: 10px;
+    display: grid; place-items: center;
+    color: var(--glass-text); background: transparent; border: none;
+    transition: background .18s ease, transform .18s var(--ease-spring), opacity .18s ease;
+  }
+  .ci-ico svg { width: 18px; height: 18px; fill: currentColor; }
+  .ci-ico:active { background: var(--glass-hover); transform: scale(.9); }
+  .ci-back svg { fill: none; }
+  .ci-more { opacity: .62; }
+
+  /* ---- 系统状态 ---- */
+  .ci-sys-row { display: flex; align-items: center; gap: 14px; flex: 1 1 auto; justify-content: center; }
+  .ci-sys { display: flex; flex-direction: column; align-items: center; line-height: 1.05; }
+  .ci-sys b { font-size: 14px; font-weight: 600; color: var(--glass-text); font-variant-numeric: tabular-nums; }
+  .ci-sys i { font-size: 9px; font-style: normal; color: rgba(226, 236, 246, .5); letter-spacing: .5px; }
+  .ci-sysdetail { flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ci-line { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: rgba(226, 236, 246, .62); }
+  .ci-line > span { width: 26px; flex: none; }
+  .ci-line em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--glass-text); }
+  .ci-track { flex: 1 1 auto; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .ci-track b { display: block; height: 100%; width: 0%; border-radius: 3px;
+    background: linear-gradient(90deg, #4ade80, #22d3ee); transition: width .4s ease; }
+  .ci-net { margin-left: auto; font-size: 11px; }
+
+  /* ---- 剪贴板 ---- */
+  .ci-chips { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; overflow: hidden; }
+  .ci-chip {
+    flex: none; max-width: 120px; height: 30px; padding: 0 10px;
+    display: flex; align-items: center;
+    font-size: 11.5px; color: var(--glass-text);
+    background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-border);
+    border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background .16s ease, transform .16s var(--ease-spring);
+  }
+  .ci-chip:active { background: var(--glass-hover); transform: scale(.95); }
+  .ci-chip.on { border-color: rgba(74, 222, 128, .6); color: #b7f7cd; }
+  .ci-chips-wide { gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+  .ci-chips-wide::-webkit-scrollbar { display: none; }
+  .ci-chip.wide { max-width: 220px; height: 26px; font-size: 11px; }
+  .ci-clipwrap { flex: 1 1 auto; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .ci-send { display: flex; align-items: center; gap: 6px; }
+  .ci-send input {
+    flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 10px;
+    font-size: 11.5px; color: var(--glass-text);
+    background: rgba(255, 255, 255, .06); border: 1px solid var(--glass-border);
+    border-radius: 8px; outline: none;
+  }
+  .ci-send input::placeholder { color: rgba(226, 236, 246, .35); }
+  .ci-sendbtn { width: 24px; height: 24px; }
+  .ci-sendbtn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; }
+
+  /* ---- 宏键 ---- */
+  .ci-macros { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: center; }
+  .ci-macros-wide { justify-content: flex-start; overflow-x: auto; }
+  .ci-macros-wide::-webkit-scrollbar { display: none; }
+  .ci-macro {
+    flex: none; min-width: 38px; height: 30px; padding: 0 8px;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 600; letter-spacing: .2px; color: var(--glass-text);
+    background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-border);
+    border-radius: 9px;
+    transition: background .16s ease, transform .16s var(--ease-spring);
+  }
+  .ci-macro:active { background: var(--glass-hover); transform: scale(.93); }
+
+  /* ---- 截图查看层 ---- */
+  .shotview {
+    position: fixed; inset: 0; z-index: 90; display: none;
+    background: rgba(4, 7, 10, .82);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  }
+  .shotview.on { display: flex; align-items: center; justify-content: center; }
+  .shotbox {
+    width: min(94vw, 900px); max-height: 88vh;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 10px; border-radius: 18px;
+    background: linear-gradient(180deg, var(--glass-top), var(--glass-bot));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--card-shadow-front);
+  }
+  .shotbox img {
+    width: 100%; max-height: calc(88vh - 60px); object-fit: contain;
+    border-radius: 12px; background: #000;
+  }
+  .shotbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-size: 12px; color: rgba(226, 236, 246, .62); padding: 0 4px; }
+  .shotbar button {
+    height: 30px; padding: 0 14px; border-radius: 9px;
+    background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 12.5px;
+  }
+
+  /* ---- 窗口管理菜单 ---- */
+  .winmenu {
+    position: fixed; z-index: 88; display: none;
+    padding: 6px; border-radius: 14px;
+    background: linear-gradient(180deg, var(--glass-top), var(--glass-bot));
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--card-blur); -webkit-backdrop-filter: var(--card-blur);
+    box-shadow: var(--card-shadow-front);
+  }
+  .winmenu.on { display: block; animation: wmIn .22s var(--ease-spring); }
+  @keyframes wmIn { from { opacity: 0; transform: translateY(-6px) scale(.96); } }
+  .winmenu .wm-title {
+    font-size: 10.5px; color: rgba(226, 236, 246, .5);
+    padding: 2px 8px 6px; max-width: 190px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .winmenu button {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    height: 34px; padding: 0 10px; border-radius: 9px;
+    background: transparent; border: none; color: var(--glass-text);
+    font-size: 12.5px; text-align: left;
+  }
+  .winmenu button:active { background: var(--glass-hover); }
+  .winmenu button.danger { color: #ff9c9c; }

@@ -348,7 +348,9 @@
         const e = islandClamp(k, 0, 1);
         y = 12 * e;                        // 排队的卡露出 12px
         sc = 1 - 0.08 * e;
-        op = 1 - 0.45 * e;
+        // 只让紧挨着的下一张露出来；再往后的全部隐藏，
+        // 否则多张卡会叠在同一位置，看起来一团糊
+        op = k > 1.5 ? 0 : (1 - 0.45 * e);
       } else {
         const e = islandClamp(-k, 0, 1);
         y = -70 * e;                       // 划走的卡向上滑出
@@ -356,6 +358,8 @@
         op = 1 - e;
       }
       const front = Math.abs(k) < 0.5;
+      // 不是前排就收回一级：否则二级的大卡片会留在后面，和前排叠在一起
+      if (!front) c.el.classList.remove('l2');
       c.el.style.transition = tr;
       c.el.style.transform =
         `translateX(-50%) translateY(${y.toFixed(2)}px) scale(${sc.toFixed(3)})`;
@@ -484,6 +488,7 @@
         }
         setTimeout(refreshTasks, 320);
       });
+      if (window.__tiHookLongPress) window.__tiHookLongPress(b);
       cache.set(key, b);
     }
     const img = b.firstChild;
@@ -570,6 +575,398 @@
     // 二级菜单的图标区要横向滑动，别被卡片切换手势抢走
     dragGuard: (e) => tiLevel === 2 && !!e.target.closest('.ti-grid'),
   });
+
+  /* ==================================================================
+     卡片 3/4/5：系统状态 / 剪贴板 / 宏键（都走 registerIslandCard）
+     ================================================================== */
+
+  // ---------- 通用：把文字复制到平板剪贴板 ----------
+  function copyToTablet(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+    flash(ok ? '已复制到平板' : '复制失败');
+    return ok;
+  }
+
+  // ---------- 通用：二级卡的开合 ----------
+  function levelBind(cardEl, moreBtn, backBtn, onOpen) {
+    if (!cardEl) return;
+    const open = (e) => {
+      e.stopPropagation();
+      cardEl.classList.add('l2');
+      islandPaint(true);
+      if (onOpen) onOpen();
+    };
+    const close = (e) => {
+      e.stopPropagation();
+      cardEl.classList.remove('l2');
+      islandPaint(true);
+    };
+    if (moreBtn) moreBtn.addEventListener('click', open);
+    if (backBtn) backBtn.addEventListener('click', close);
+    cardEl.__collapse = () => cardEl.classList.remove('l2');
+  }
+
+  // ================= 卡片 3：系统状态 =================
+  const sysIsland = document.getElementById('sysIsland');
+  const sysCpuEl = document.getElementById('sysCpu');
+  const sysMemEl = document.getElementById('sysMem');
+  const sysNetEl = document.getElementById('sysNet');
+  const sysCpuTxt = document.getElementById('sysCpuTxt');
+  const sysMemTxt = document.getElementById('sysMemTxt');
+  const sysNetTxt = document.getElementById('sysNetTxt');
+  const sysCpuBar = document.getElementById('sysCpuBar');
+  const sysMemBar = document.getElementById('sysMemBar');
+  let sysTimer = 0;
+  let sysData = null;
+
+  function fmtBps(v) {
+    v = Number(v) || 0;
+    if (v > 1024 * 1024) return (v / 1048576).toFixed(1) + 'M';
+    if (v > 1024) return (v / 1024).toFixed(0) + 'K';
+    return v + 'B';
+  }
+
+  function sysPaint() {
+    const d = sysData;
+    if (!d) return;
+    const cpu = Math.round(d.cpu || 0);
+    const mem = Math.round(d.mem || 0);
+    if (sysCpuEl) sysCpuEl.textContent = cpu + '%';
+    if (sysMemEl) sysMemEl.textContent = mem + '%';
+    if (sysNetEl) sysNetEl.textContent = '↓' + fmtBps(d.rx);
+    if (sysCpuTxt) sysCpuTxt.textContent = cpu + '%';
+    if (sysMemTxt) {
+      const usedG = d.memUsed ? (d.memUsed / 1073741824).toFixed(1) : '—';
+      const totalG = d.memTotal ? (d.memTotal / 1073741824).toFixed(0) : '—';
+      sysMemTxt.textContent = usedG + '/' + totalG + 'G';
+    }
+    if (sysNetTxt) sysNetTxt.textContent = '↓' + fmtBps(d.rx) + '/s  ↑' + fmtBps(d.tx) + '/s';
+    if (sysCpuBar) sysCpuBar.style.width = Math.min(100, cpu) + '%';
+    if (sysMemBar) sysMemBar.style.width = Math.min(100, mem) + '%';
+  }
+
+  async function sysFetch() {
+    try {
+      const r = await fetch(`/sys?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      sysData = await r.json();
+      sysPaint();
+    } catch (_) {}
+  }
+
+  function sysStart() {
+    sysFetch();
+    if (sysTimer) return;
+    sysTimer = setInterval(sysFetch, 2000);
+  }
+
+  function sysStop() {
+    clearInterval(sysTimer);
+    sysTimer = 0;
+  }
+
+  if (sysIsland) {
+    levelBind(sysIsland, document.getElementById('sysMore'),
+              document.getElementById('sysBack'), sysStart);
+    registerIslandCard({
+      id: 'sys', order: 30, title: '系统状态', el: sysIsland,
+      onActivate: sysStart,
+      onDeactivate: () => { sysStop(); if (sysIsland.__collapse) sysIsland.__collapse(); },
+    });
+  }
+
+  // ================= 卡片 4：剪贴板 =================
+  const clipIsland = document.getElementById('clipIsland');
+  const clipChips = document.getElementById('clipChips');
+  const clipChips2 = document.getElementById('clipChips2');
+  const clipInput = document.getElementById('clipInput');
+  let clipTimer = 0;
+  let clipItems = [];
+
+  function clipPaint() {
+    const list = clipItems || [];
+    // 一级：最多 2 条
+    if (clipChips) {
+      clipChips.innerHTML = '';
+      if (!list.length) {
+        const d = document.createElement('span');
+        d.className = 'ci-chip';
+        d.textContent = '剪贴板是空的';
+        d.style.opacity = '.45';
+        clipChips.appendChild(d);
+      }
+      list.slice(0, 2).forEach((it) => {
+        const b = document.createElement('button');
+        b.className = 'ci-chip';
+        b.textContent = (it.text || '').replace(/\s+/g, ' ').slice(0, 16) || '(空)';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          copyToTablet(it.text || '');
+          b.classList.add('on');
+          setTimeout(() => b.classList.remove('on'), 700);
+        });
+        clipChips.appendChild(b);
+      });
+    }
+    // 二级：最多 6 条，横向滚动
+    if (clipChips2) {
+      clipChips2.innerHTML = '';
+      if (!list.length) {
+        const d = document.createElement('span');
+        d.className = 'ci-chip wide';
+        d.textContent = '电脑剪贴板是空的';
+        d.style.opacity = '.45';
+        clipChips2.appendChild(d);
+      }
+      list.slice(0, 6).forEach((it) => {
+        const b = document.createElement('button');
+        b.className = 'ci-chip wide';
+        b.textContent = (it.text || '').replace(/\s+/g, ' ').slice(0, 40) || '(空)';
+        b.title = it.text || '';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          copyToTablet(it.text || '');
+          b.classList.add('on');
+          setTimeout(() => b.classList.remove('on'), 700);
+        });
+        clipChips2.appendChild(b);
+      });
+    }
+  }
+
+  async function clipFetch() {
+    try {
+      const r = await fetch(`/clip?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      clipItems = Array.isArray(d.items) ? d.items : [];
+      clipPaint();
+    } catch (_) {}
+  }
+
+  function clipStart() {
+    clipFetch();
+    if (clipTimer) return;
+    clipTimer = setInterval(clipFetch, 3000);
+  }
+
+  function clipStop() {
+    clearInterval(clipTimer);
+    clipTimer = 0;
+  }
+
+  function clipSendText() {
+    const v = (clipInput && clipInput.value || '').trim();
+    if (!v) { flash('先输入内容'); return; }
+    send({ t: 'clip.set', text: v });
+    flash('已发到电脑剪贴板');
+    if (clipInput) clipInput.value = '';
+    setTimeout(clipFetch, 400);
+  }
+
+  if (clipIsland) {
+    levelBind(clipIsland, document.getElementById('clipMore'),
+              document.getElementById('clipBack'), clipStart);
+    const sendBtn = document.getElementById('clipSend');
+    if (sendBtn) sendBtn.addEventListener('click', (e) => { e.stopPropagation(); clipSendText(); });
+    if (clipInput) {
+      clipInput.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); clipSendText(); }
+      });
+      // 平板上粘贴后自动发一次
+      clipInput.addEventListener('paste', () => setTimeout(clipSendText, 60));
+      clipInput.addEventListener('pointerdown', (e) => e.stopPropagation());
+    }
+    registerIslandCard({
+      id: 'clip', order: 40, title: '剪贴板', el: clipIsland,
+      onActivate: clipStart,
+      onDeactivate: () => { clipStop(); if (clipIsland.__collapse) clipIsland.__collapse(); },
+    });
+  }
+
+  // ================= 卡片 5：宏键 =================
+  const MACROS = [
+    { k: '复制', mods: [0x11], vk: 0x56 },
+    { k: '粘贴', mods: [0x11], vk: 0x58 },
+    { k: '撤销', mods: [0x11], vk: 0x5A },
+    { k: '保存', mods: [0x11], vk: 0x53 },
+    { k: '全选', mods: [0x11], vk: 0x41 },
+    { k: 'Tab', mods: [], vk: 0x09 },
+    { k: '回车', mods: [], vk: 0x0D },
+    { k: 'Esc', mods: [], vk: 0x1B },
+    { k: '删除', mods: [], vk: 0x2E },
+    { k: '关窗', mods: [0x12], vk: 0x73 },   // Alt+F4
+  ];
+
+  const macroIsland = document.getElementById('macroIsland');
+  const macroRow = document.getElementById('macroRow');
+  const macroRow2 = document.getElementById('macroRow2');
+
+  function macroBtn(m, wide) {
+    const b = document.createElement('button');
+    b.className = 'ci-macro';
+    b.textContent = m.k;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (m.mods && m.mods.length) send({ t: 'ks', mods: m.mods, vk: m.vk });
+      else send({ t: 'k', vk: m.vk });
+      b.style.background = 'var(--glass-hover)';
+      setTimeout(() => { b.style.background = ''; }, 180);
+    });
+    return b;
+  }
+
+  if (macroIsland && macroRow) {
+    MACROS.slice(0, 5).forEach((m) => macroRow.appendChild(macroBtn(m)));
+    if (macroRow2) MACROS.forEach((m) => macroRow2.appendChild(macroBtn(m, true)));
+    levelBind(macroIsland, document.getElementById('macroMore'),
+              document.getElementById('macroBack'), null);
+    registerIslandCard({
+      id: 'macro', order: 50, title: '快捷按键', el: macroIsland,
+      onDeactivate: () => { if (macroIsland.__collapse) macroIsland.__collapse(); },
+    });
+  }
+
+  // ================= 截图查看 =================
+  const shotView = document.getElementById('shotView');
+  const shotImg = document.getElementById('shotImg');
+  const shotClose = document.getElementById('shotClose');
+  const shotBtn = document.getElementById('shotBtn');
+
+  async function takeShot() {
+    flash('正在截图…');
+    try {
+      const r = await fetch(`/shot?k=${encodeURIComponent(KEY)}&r=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      shotImg.src = URL.createObjectURL(blob);
+      shotView.classList.add('on');
+      shotView.setAttribute('aria-hidden', 'false');
+      flash('截图已就绪');
+    } catch (e) {
+      flash('截图失败');
+    }
+  }
+
+  if (shotBtn) {
+    shotBtn.addEventListener('click', (e) => { e.stopPropagation(); takeShot(); });
+  }
+  if (shotClose) {
+    shotClose.addEventListener('click', () => {
+      shotView.classList.remove('on');
+      shotView.setAttribute('aria-hidden', 'true');
+      setTimeout(() => { if (shotImg.src) URL.revokeObjectURL(shotImg.src); }, 300);
+    });
+  }
+
+  // ================= 窗口管理菜单（长按任务栏图标） =================
+  const winMenu = document.getElementById('winMenu');
+  let winMenuFor = 0;
+
+  const WIN_ACTIONS = [
+    { a: 'left', label: '左半屏' },
+    { a: 'right', label: '右半屏' },
+    { a: 'max', label: '最大化' },
+    { a: 'center', label: '居中' },
+    { a: 'close', label: '关闭窗口', danger: true },
+  ];
+
+  function hideWinMenu() {
+    if (!winMenu) return;
+    winMenu.classList.remove('on');
+    winMenu.setAttribute('aria-hidden', 'true');
+    winMenuFor = 0;
+  }
+
+  function showWinMenu(x, y, item) {
+    if (!winMenu) return;
+    winMenuFor = item.h;
+    winMenu.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'wm-title';
+    title.textContent = item.name || item.icon || '';
+    winMenu.appendChild(title);
+
+    if (!item.h) {
+      const b = document.createElement('button');
+      b.textContent = '启动这个程序';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        send({ t: 'run', p: item.icon });
+        hideWinMenu();
+      });
+      winMenu.appendChild(b);
+    } else {
+      WIN_ACTIONS.forEach((act) => {
+        const b = document.createElement('button');
+        b.textContent = act.label;
+        if (act.danger) b.className = 'danger';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          send({ t: 'win', h: item.h, a: act.a });
+          hideWinMenu();
+          if (act.a === 'close') setTimeout(refreshTasks, 400);
+        });
+        winMenu.appendChild(b);
+      });
+    }
+
+    const w = 168;
+    const left = Math.min(window.innerWidth - w - 10, Math.max(10, x - w / 2));
+    const top = Math.min(window.innerHeight - 40, Math.max(10, y + 12));
+    winMenu.style.left = left + 'px';
+    winMenu.style.top = top + 'px';
+    winMenu.style.width = w + 'px';
+    winMenu.classList.add('on');
+    winMenu.setAttribute('aria-hidden', 'false');
+  }
+
+  // 全局：点别处收起菜单
+  document.addEventListener('pointerdown', (e) => {
+    if (!winMenu || !winMenu.classList.contains('on')) return;
+    if (e.target.closest('#winMenu')) return;
+    hideWinMenu();
+  }, true);
+
+  // 给任务栏图标挂长按
+  function attachIconLongPress(btn) {
+    let timer = 0;
+    let moved = false;
+    const start = (e) => {
+      moved = false;
+      clearTimeout(timer);
+      const x = e.clientX, y = e.clientY;
+      timer = setTimeout(() => {
+        if (moved) return;
+        const it = btn.__item || {};
+        showWinMenu(x, y, it);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 480);
+    };
+    const cancel = () => clearTimeout(timer);
+    btn.addEventListener('pointerdown', start, { passive: true });
+    btn.addEventListener('pointermove', (e) => {
+      if (Math.abs(e.clientX - (btn.__x || 0)) > 8) moved = true;
+      cancel();
+    }, { passive: true });
+    btn.addEventListener('pointerup', cancel);
+    btn.addEventListener('pointercancel', cancel);
+    btn.addEventListener('pointerleave', cancel);
+  }
+  // 记录坐标，供滑动判定
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest && e.target.closest('.ti-app');
+    if (b) { b.__x = e.clientX; }
+  }, true);
+
+  // tiIconFor 生成按钮时回调这里
+  window.__tiHookLongPress = attachIconLongPress;
 
   // 所有卡片挂上拖动
   ISLAND_CARDS.forEach((c) => islandAttachDrag(c.el));

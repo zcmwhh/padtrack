@@ -296,6 +296,10 @@ def handle_message(msg):
         activate_window(msg.get("h"))
     elif t == "run":
         run_pinned(msg.get("p"))
+    elif t == "win":
+        arrange_window(msg.get("h"), msg.get("a"))
+    elif t == "clip.set":
+        clip_write(msg.get("text") or "")
     elif t == "mctl":
         a = str(msg.get("a") or "")
         if a == "playpause":
@@ -1513,6 +1517,41 @@ class Handler(socketserver.BaseRequestHandler):
                            "application/json; charset=utf-8")
                 return
 
+            if method == "GET" and path == "/sys":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps({
+                    "cpu": _sys_state["cpu"],
+                    "mem": _sys_state["mem"],
+                    "memUsed": _sys_state["memUsed"],
+                    "memTotal": _sys_state["memTotal"],
+                    "rx": _sys_state["rx"],
+                    "tx": _sys_state["tx"],
+                    "up": _sys_state["up"],
+                }).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/clip":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps({"items": clip_history()}, ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/shot":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"", "image/png")
+                    return
+                png = grab_screen_png(1400)
+                if not png:
+                    self._http(sock, 503, b"", "image/png")
+                    return
+                self._http(sock, 200, png, "image/png")
+                return
+
             if method == "GET" and path == "/tasks":
                 if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
@@ -2633,6 +2672,347 @@ def activate_window(hwnd):
         return {"ok": ok, "action": "activate"}
     except Exception as e:
         return {"ok": False, "reason": str(e)[:60]}
+
+
+
+# ======================================================================
+# 窗口管理 / 剪贴板 / 系统状态 / 截图
+# ======================================================================
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+class _MEMSTAT(ctypes.Structure):
+    _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+
+user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = wintypes.HMONITOR
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.UINT]
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.GetDC.argtypes = [wintypes.HWND]
+user32.GetDC.restype = wintypes.HDC
+user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.IsZoomed.argtypes = [wintypes.HWND]
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.c_void_p]
+user32.EmptyClipboard.restype = wintypes.BOOL
+# GDI 句柄必须显式声明成 HANDLE，否则 ctypes 按 32 位 int 传，值一大就
+# OverflowError（截图偶发失败就是这个）
+gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+gdi32.CreateCompatibleDC.restype = wintypes.HDC
+gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+gdi32.CreateCompatibleBitmap.restype = wintypes.HBITMAP
+gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HANDLE]
+gdi32.SelectObject.restype = wintypes.HANDLE
+gdi32.BitBlt.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                         wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]
+gdi32.BitBlt.restype = wintypes.BOOL
+gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+gdi32.DeleteDC.argtypes = [wintypes.HDC]
+
+
+def _work_area(hwnd):
+    mon = user32.MonitorFromWindow(hwnd, 2)   # MONITOR_DEFAULTTONEAREST
+    if not mon:
+        return None
+    mi = _MONITORINFO()
+    mi.cbSize = ctypes.sizeof(_MONITORINFO)
+    if not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+        return None
+    return mi.rcWork
+
+
+def arrange_window(hwnd, action):
+    """窗口贴边/最大化/居中/关闭。action: left right max center close"""
+    try:
+        hwnd = int(hwnd or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "bad_hwnd"}
+    if not hwnd or not user32.IsWindow(hwnd):
+        return {"ok": False, "reason": "no_window"}
+    a = str(action or "")
+    if a == "close":
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)     # WM_CLOSE
+        return {"ok": True}
+    if a == "max":
+        user32.ShowWindow(hwnd, 3)                  # SW_MAXIMIZE
+        return {"ok": True}
+    if a == "restore":
+        user32.ShowWindow(hwnd, 9)                  # SW_RESTORE
+        return {"ok": True}
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)
+    if user32.IsZoomed(hwnd):                       # 最大化状态下先还原，否则改不了大小
+        user32.ShowWindow(hwnd, 9)
+    wa = _work_area(hwnd)
+    if not wa:
+        return {"ok": False, "reason": "no_monitor"}
+    ww, wh = wa.right - wa.left, wa.bottom - wa.top
+    if a == "left":
+        x, y, w, h = wa.left, wa.top, ww // 2, wh
+    elif a == "right":
+        x, y, w, h = wa.left + ww // 2, wa.top, ww - ww // 2, wh
+    elif a == "center":
+        rc = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rc))
+        w, h = max(320, rc.right - rc.left), max(240, rc.bottom - rc.top)
+        w, h = min(w, ww), min(h, wh)
+        x, y = wa.left + (ww - w) // 2, wa.top + (wh - h) // 2
+    else:
+        return {"ok": False, "reason": "bad_action"}
+    user32.SetWindowPos(hwnd, 0, x, y, w, h, 0x0004 | 0x0010)   # NOZORDER | NOACTIVATE
+    return {"ok": True, "rect": [x, y, w, h]}
+
+
+# ---- 剪贴板 ----
+kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalLock.restype = ctypes.c_void_p
+kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalSize.restype = ctypes.c_size_t
+user32.OpenClipboard.argtypes = [wintypes.HWND]
+# 必须设 restype：HANDLE 是 64 位，不设会按 int 截断，GlobalLock 拿到非法句柄
+user32.GetClipboardData.argtypes = [wintypes.UINT]
+user32.GetClipboardData.restype = wintypes.HANDLE
+user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HGLOBAL]
+user32.SetClipboardData.restype = wintypes.HANDLE
+
+
+def clip_read():
+    """读文本剪贴板。"""
+    for _ in range(3):
+        if not user32.OpenClipboard(0):
+            time.sleep(0.03)
+            continue
+        try:
+            h = user32.GetClipboardData(13)          # CF_UNICODETEXT
+            if not h:
+                return ""
+            ptr = kernel32.GlobalLock(h)
+            if not ptr:
+                return ""
+            try:
+                # 不能用 GlobalSize 猜长度：跨进程的 CF_UNICODETEXT 经常返回 0，
+                # 一旦按猜的长度读就越界崩溃。直接读到 NUL 为止（剪贴板文本一定以 NUL 结尾）。
+                return ctypes.wstring_at(ptr)
+            finally:
+                kernel32.GlobalUnlock(h)
+        finally:
+            user32.CloseClipboard()
+    return ""
+
+
+def clip_write(text):
+    """写文本到剪贴板。"""
+    data = (str(text)[:20000] + "\x00").encode("utf-16-le")
+    for _ in range(3):
+        if not user32.OpenClipboard(0):
+            time.sleep(0.03)
+            continue
+        try:
+            user32.EmptyClipboard()
+            h = kernel32.GlobalAlloc(0x0042, len(data))   # GMEM_MOVEABLE|GMEM_ZEROINIT
+            if not h:
+                return False
+            ptr = kernel32.GlobalLock(h)
+            if not ptr:
+                return False
+            ctypes.memmove(ptr, data, len(data))
+            kernel32.GlobalUnlock(h)
+            if not user32.SetClipboardData(13, h):
+                return False
+            return True
+        finally:
+            user32.CloseClipboard()
+    return False
+
+
+_clip_hist = {"items": [], "last": None, "t": 0.0}
+
+
+def clip_history(limit=6):
+    """最近几条不同的剪贴板文本（自己记历史，系统不提供）。"""
+    st = _clip_hist
+    if time.time() - st["t"] > 0.8:
+        st["t"] = time.time()
+        cur = clip_read()
+        if cur and cur != st["last"]:
+            st["last"] = cur
+            st["items"].insert(0, {"t": time.time(), "text": cur[:2000]})
+            st["items"] = st["items"][:limit]
+    return st["items"]
+
+
+# ---- 系统状态 ----
+_cpu_prev = {"idle": 0, "busy": 0, "t": 0.0}
+_net_prev = {"t": 0.0, "rx": 0, "tx": 0, "ok": False}
+_sys_state = {"cpu": 0.0, "mem": 0.0, "memUsed": 0, "memTotal": 0, "rx": 0, "tx": 0, "up": 0}
+
+
+class _FILETIME(ctypes.Structure):
+    _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+
+def _ft(v):
+    return (v.dwHighDateTime << 32) | v.dwLowDateTime
+
+
+def _cpu_sample():
+    idle, kern, user = _FILETIME(), _FILETIME(), _FILETIME()
+    if not kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user)):
+        return 0.0
+    i, k, u = _ft(idle), _ft(kern), _ft(user)
+    pi, pk, pu = _cpu_prev["idle"], _cpu_prev["busy"], _cpu_prev["t"]
+    _cpu_prev["idle"], _cpu_prev["busy"], _cpu_prev["t"] = i, k + u, time.time()
+    if not pk:
+        return 0.0
+    di = i - pi
+    dt = (k + u) - pk
+    if dt <= 0:
+        return _sys_state["cpu"]
+    busy = max(0.0, min(1.0, 1.0 - di / dt))
+    return round(busy * 100, 1)
+
+
+NET_PS = r"""
+$ErrorActionPreference='SilentlyContinue'
+$n = Get-NetAdapterStatistics | Where-Object { $_.ReceivedBytes -ne $null }
+$rx = 0; $tx = 0
+foreach ($i in $n) { $rx += $i.ReceivedBytes; $tx += $i.SentBytes }
+"{0} {1}" -f [int64]$rx, [int64]$tx
+"""
+
+
+def _net_sample():
+    script = _ps_script(NET_PS, "netstat")
+    if not script:
+        return
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=6, creationflags=0x08000000,
+        ).stdout.strip()
+        parts = out.split()
+        if len(parts) >= 2:
+            rx, tx = int(parts[-2]), int(parts[-1])
+            now = time.time()
+            p = _net_prev
+            if p["ok"] and now - p["t"] > 0.2:
+                dt = now - p["t"]
+                _sys_state["rx"] = max(0, int((rx - p["rx"]) / dt))
+                _sys_state["tx"] = max(0, int((tx - p["tx"]) / dt))
+            p["t"], p["rx"], p["tx"], p["ok"] = now, rx, tx, True
+    except Exception:
+        pass
+
+
+def _sys_loop():
+    while True:
+        try:
+            _sys_state["cpu"] = _cpu_sample()
+            ms = _MEMSTAT()
+            ms.dwLength = ctypes.sizeof(_MEMSTAT)
+            if kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                _sys_state["mem"] = round(float(ms.dwMemoryLoad), 1)
+                _sys_state["memTotal"] = int(ms.ullTotalPhys)
+                _sys_state["memUsed"] = int(ms.ullTotalPhys - ms.ullAvailPhys)
+            _sys_state["up"] = int(time.time() - _boot_time)
+            # 网络统计要起 PowerShell，别太勤，5 秒一次
+            if time.time() - _sys_state.get("_net_t", 0.0) > 5.0:
+                _sys_state["_net_t"] = time.time()
+                _net_sample()
+        except Exception:
+            pass
+        time.sleep(1.6)
+
+
+# ---- 截图 ----
+class _BITMAP(ctypes.Structure):
+    _fields_ = [("bmType", ctypes.c_long), ("bmWidth", ctypes.c_long),
+                ("bmHeight", ctypes.c_long), ("bmWidthBytes", ctypes.c_long),
+                ("bmPlanes", wintypes.WORD), ("bmBitsPixel", wintypes.WORD),
+                ("bmBits", ctypes.c_void_p)]
+
+
+def grab_screen_png(max_w=1600):
+    """抓主屏（会把整屏按 max_w 等比缩小），返回 PNG 字节。"""
+    try:
+        w = user32.GetSystemMetrics(0)
+        h = user32.GetSystemMetrics(1)
+        if w <= 0 or h <= 0:
+            return None
+        src = user32.GetDC(0)
+        if not src:
+            return None
+        mem = gdi32.CreateCompatibleDC(src)
+        bmp = gdi32.CreateCompatibleBitmap(src, w, h)
+        gdi32.SelectObject(mem, bmp)
+        gdi32.BitBlt(mem, 0, 0, w, h, src, 0, 0, 0x00CC0020)   # SRCCOPY
+        bmi = _BITMAPINFOHEADER()
+        bmi.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+        bmi.biWidth = w
+        bmi.biHeight = -h
+        bmi.biPlanes = 1
+        bmi.biBitCount = 32
+        bmi.biCompression = 0
+        buf = ctypes.create_string_buffer(w * h * 4)
+        gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), 0)
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(0, src)
+
+        raw = bytearray(buf.raw)
+        # BGRA → RGBA
+        raw[0::4], raw[2::4] = raw[2::4], raw[0::4]
+        raw[3::4] = b"\xff" * (w * h)
+
+        # 需要时等比缩小（步长采样，够快也够看）
+        if w > max_w:
+            step = (w + max_w - 1) // max_w
+            nw, nh = w // step, h // step
+            small = bytearray(nw * nh * 4)
+            for y in range(nh):
+                sy = y * step
+                row = sy * w * 4
+                for x in range(nw):
+                    sx = x * step
+                    si = row + sx * 4
+                    di = (y * nw + x) * 4
+                    small[di:di + 4] = raw[si:si + 4]
+            return _png(nw, nh, bytes(small))
+        return _png(w, h, bytes(raw))
+    except Exception:
+        import traceback as _tb
+        global _shot_err
+        _shot_err = _tb.format_exc()[-400:]
+        return None
+
+
+_shot_err = ""
+
+
+def _boot_time_now():
+    try:
+        return time.time() - (kernel32.GetTickCount64() / 1000.0)
+    except Exception:
+        return time.time()
+
+
+_boot_time = _boot_time_now()
+threading.Thread(target=_sys_loop, daemon=True).start()
 
 
 def ime_state():

@@ -6,7 +6,8 @@
 >
 > 引擎位置：`web/app.js` 里的 `ISLAND CARDS` 大注释块。
 > 外壳样式：`web/app.css` 里的 `.island-card` 和 `:root` 的 `--card-*` 变量。
-> 当前已注册：`music`（播放器）、`tasks`（任务栏）。
+> 当前已注册：`music`（播放器 10）、`tasks`（任务栏 20）、`sys`（系统状态 30）、
+> `clip`（剪贴板 40）、`macro`（快捷按键 50）。
 
 ---
 
