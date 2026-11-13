@@ -1005,12 +1005,20 @@
     iconPressX = e.clientX;
     iconPressY = e.clientY;
     clearTimeout(iconPressTimer);
-    iconPressTimer = setTimeout(() => {
+    iconPressTimer = setTimeout(async () => {
       iconPressTimer = 0;
       if (iconPressMoved) return;
       islandSwallowClick = performance.now() + 600;
       if (navigator.vibrate) navigator.vibrate(12);
-      showWinMenu(iconPressX, iconPressY, btn.__item || {});
+      // 先拉一次最新状态：否则「刚在电脑上最大化」的窗口，菜单里还是旧文案
+      const stale = btn.__item || {};
+      let fresh = stale;
+      try {
+        await refreshTasks();
+        const hit = (tiTasks || []).find((t) => t.h && t.h === stale.h);
+        if (hit) fresh = Object.assign({}, stale, hit);
+      } catch (_) {}
+      showWinMenu(iconPressX, iconPressY, fresh);
     }, 460);
   }, true);
 
