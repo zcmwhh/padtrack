@@ -1095,6 +1095,18 @@
       ctrls.appendChild(tg);
       row.appendChild(ctrls);
 
+      // 点卡片本身 = 选中这张卡（关掉面板并把它切到前面）
+      cardEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const live = islandLive();
+        const idx = live.findIndex((c) => c.id === card.id);
+        if (idx >= 0) {
+          islandPos = idx;
+          islandPaint(true);
+        }
+        cfgClosePanel();
+      });
+
       up.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, -1); });
       down.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, 1); });
       tg.addEventListener('click', (e) => { e.stopPropagation(); cfgToggle(card.id); });
@@ -1107,8 +1119,8 @@
   // 只改 transform，靠 CSS transition 做动画（重排也是同一个动画）
   function cfgLayout(animate) {
     const list = cfgOrdered();
-    const step = 50;                     // 每张卡错开 50px（卡高 84，所以有重叠）
-    const h = 84;
+    const step = 74;                     // 每张卡错开 74px（卡高 108，露 74px）
+    const h = 108;
     const total = h + (list.length - 1) * step;
 
     list.forEach((card, i) => {
