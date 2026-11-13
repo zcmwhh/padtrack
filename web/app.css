@@ -164,6 +164,10 @@ html.glass-light {
      改标准请改 :root 里的 --card-* 变量，不要在这里写死数值。
      ============================================================== */
   .island-card {
+    /* 长按不要触发系统文字选择/复制菜单，否则会发 pointercancel 打断长按 */
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
     position: fixed;
     top: calc(10px + env(safe-area-inset-top));
     left: 50%;
@@ -1151,6 +1155,7 @@ html.glass-light {
   .ti-recent { display: flex; align-items: center; gap: 8px; flex: none; }
 
   .ti-app {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     width: 36px; height: 36px; border-radius: 11px; flex: none;
     position: relative;
     display: grid; place-items: center;

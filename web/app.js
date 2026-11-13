@@ -488,7 +488,6 @@
         }
         setTimeout(refreshTasks, 320);
       });
-      if (window.__tiHookLongPress) window.__tiHookLongPress(b);
       cache.set(key, b);
     }
     const img = b.firstChild;
@@ -987,8 +986,42 @@
     if (b) { b.__x = e.clientX; }
   }, true);
 
-  // tiIconFor 生成按钮时回调这里
-  window.__tiHookLongPress = attachIconLongPress;
+
+  // 长按任务栏图标 → 窗口管理菜单。
+  // 用事件委托挂在任务栏卡上，不依赖图标节点创建时机。
+  let iconPressTimer = 0;
+  let iconPressMoved = false;
+  let iconPressX = 0, iconPressY = 0;
+
+  taskIsland.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest && e.target.closest('.ti-app');
+    if (!btn) return;
+    iconPressMoved = false;
+    iconPressX = e.clientX;
+    iconPressY = e.clientY;
+    clearTimeout(iconPressTimer);
+    iconPressTimer = setTimeout(() => {
+      iconPressTimer = 0;
+      if (iconPressMoved) return;
+      islandSwallowClick = performance.now() + 600;
+      if (navigator.vibrate) navigator.vibrate(12);
+      showWinMenu(iconPressX, iconPressY, btn.__item || {});
+    }, 460);
+  }, true);
+
+  window.addEventListener('pointermove', (e) => {
+    if (!iconPressTimer) return;
+    if (Math.abs(e.clientX - iconPressX) > 8 || Math.abs(e.clientY - iconPressY) > 8) {
+      iconPressMoved = true;
+      clearTimeout(iconPressTimer);
+      iconPressTimer = 0;
+    }
+  }, true);
+
+  window.addEventListener('pointerup', () => {
+    clearTimeout(iconPressTimer);
+    iconPressTimer = 0;
+  }, true);
 
 
   /* ==================================================================
@@ -1252,6 +1285,12 @@
     el.addEventListener('pointercancel', () => clearTimeout(timer));
     el.addEventListener('pointerleave', () => clearTimeout(timer));
   }
+
+  // islandNoMenu：长按时系统别弹菜单（安卓上会抢走手势）
+  ['island', 'taskIsland', 'sysIsland', 'clipIsland', 'macroIsland', 'islandCfg'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
 
   // 应用保存过的显隐/顺序，挂拖动与长按
   cfgApply();
