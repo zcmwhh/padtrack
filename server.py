@@ -2456,27 +2456,49 @@ def _pins():
     return m
 
 
+_task_state = {"seq": {}, "next": 0, "names": []}
+
+
+def _task_seq(key):
+    """给每个条目一个「第一次出现」的序号，之后顺序就固定了。"""
+    st = _task_state
+    if key not in st["seq"]:
+        st["seq"][key] = st["next"]
+        st["next"] += 1
+    return st["seq"][key]
+
+
 def tasks_payload():
-    """按 Windows 任务栏的顺序与成员返回（固定程序没运行也显示）。"""
+    """按 Windows 任务栏的顺序与成员返回（固定程序没运行也显示）。
+
+    顺序稳定性：
+      - 主体顺序来自 UI Automation（= 真任务栏顺序）
+      - UIA 没覆盖到的窗口按「第一次出现」的序号追加，不按 Z 序
+      - 上次有、这次 UIA 没读到的固定项，补回它上次的位置
+    """
     rows = _enum_windows()
     fg = int(user32.GetForegroundWindow() or 0)
     pins = _pins()
+    pin_exe = _pin_exe_map()
 
     try:
         bars = _taskbar_uia()
     except Exception:
         bars = []
 
-    pin_exe = _pin_exe_map()
-
     out = []
     used = set()
+    seen_icons = set()
+
+    def icon_key(icon):
+        return (icon or "").lower()
+
     for b in bars:
         name = b["name"]
         low = name.lower()
         match = None
 
-        # 先按「固定项目标 exe」匹配：歌名标题的播放器也能对上
+        # 先按「固定项目标 exe」匹配（歌名标题的播放器也能对上）
         _pi = pin_exe.get(name) or {}
         want_exe = ((_pi.get("exe") if isinstance(_pi, dict) else _pi) or "").lower()
         if want_exe:
@@ -2495,25 +2517,70 @@ def tasks_payload():
                 if low and low in hay:
                     match = r
                     break
+
         if match:
+            icon = match["exe"] or ""
             used.add(match["h"])
-            out.append({"name": name, "icon": match["exe"] or "", "lnk": "",
-                        "h": match["h"], "running": True,
-                        "active": match["h"] == fg, "min": match["min"]})
+            item = {"name": name, "icon": icon, "lnk": "", "h": match["h"],
+                    "running": True, "active": match["h"] == fg, "min": match["min"]}
         else:
             lnk = pins.get(name, "")
-            out.append({"name": name,
-                        "icon": (os.path.basename(lnk) if lnk else ""),
-                        "lnk": lnk, "h": 0, "running": False,
-                        "active": False, "min": False})
+            icon = os.path.basename(lnk) if lnk else ""
+            item = {"name": name, "icon": icon, "lnk": lnk, "h": 0,
+                    "running": False, "active": False, "min": False}
 
-    # UIA 没列到的窗口补最后（比如刚打开还没刷新）
+        # 图标解析不出来的幽灵条目（没有窗口、也没有固定快捷方式）直接丢
+        if not icon:
+            continue
+        # 同一个程序只留一个（雷神那种会同时出现中文名和 leigod 两条）
+        if icon_key(icon) in seen_icons:
+            continue
+        seen_icons.add(icon_key(icon))
+        item["_key"] = ("w%d" % item["h"]) if item["h"] else ("p" + icon)
+        out.append(item)
+
+    # UIA 没覆盖到的窗口：按第一次出现的顺序追加，绝不按 Z 序
+    extra = []
     for r in rows:
         if r["h"] in used:
             continue
-        out.append({"name": r["title"], "icon": r["exe"] or "", "lnk": "",
-                    "h": r["h"], "running": True,
-                    "active": r["h"] == fg, "min": r["min"]})
+        icon = r["exe"] or ""
+        if not icon or icon_key(icon) in seen_icons:
+            continue
+        seen_icons.add(icon_key(icon))
+        extra.append({"name": r["title"], "icon": icon, "lnk": "", "h": r["h"],
+                      "running": True, "active": r["h"] == fg, "min": r["min"],
+                      "_key": "w%d" % r["h"]})
+    extra.sort(key=lambda it: _task_seq(it["_key"]))
+    out.extend(extra)
+
+    # 上次有、这次 UIA 没读到的固定项：补回它上次的位置
+    now_names = [it["name"] for it in out]
+    prev = _task_state["names"]
+    for i, nm in enumerate(prev):
+        if nm in now_names:
+            continue
+        lnk = pins.get(nm, "")
+        if not lnk:
+            continue
+        icon = os.path.basename(lnk)
+        if icon_key(icon) in seen_icons:
+            continue
+        seen_icons.add(icon_key(icon))
+        # 插在它上次后面的那个已知条目前面
+        pos = len(out)
+        for nxt in prev[i + 1:]:
+            if nxt in now_names:
+                pos = now_names.index(nxt)
+                break
+        out.insert(pos, {"name": nm, "icon": icon, "lnk": lnk, "h": 0,
+                         "running": False, "active": False, "min": False,
+                         "_key": "p" + icon})
+        now_names = [it["name"] for it in out]
+
+    for it in out:
+        it.pop("_key", None)
+    _task_state["names"] = [it["name"] for it in out]
 
     return {"list": out, "count": len(out)}
 
