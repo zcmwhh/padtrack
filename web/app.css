@@ -1044,3 +1044,91 @@ html.glass-light {
   -webkit-backdrop-filter: blur(26px) saturate(180%);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);
 }
+
+
+  /* ---------------- 任务栏卡片（和灵动岛同一位置堆叠） ---------------- */
+  #taskIsland {
+    position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%;
+    z-index: 69;
+    width: 248px; height: 46px; border-radius: 24px;
+    padding: 0 6px;
+    display: flex; align-items: center;
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .05);
+    transform: translateX(-50%) translateY(16px) scale(.9);
+    opacity: 0; pointer-events: none;
+    overflow: hidden;
+    transition: width .34s var(--ease-out), height .34s var(--ease-out),
+                border-radius .34s var(--ease-out), transform .46s var(--ease-spring),
+                opacity .3s ease;
+  }
+  #taskIsland.on { opacity: 1; pointer-events: auto; }
+  #taskIsland.front {
+    transform: translateX(-50%) translateY(0) scale(1);
+    background: rgba(13, 18, 24, .94);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .06);
+  }
+  #island.front {
+    background: rgba(13, 18, 24, .94);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .06);
+  }
+  #taskIsland.back { transform: translateX(-50%) translateY(16px) scale(.9); }
+
+  #taskIsland button { border: none; background: transparent; color: #c7d5e3;
+    display: grid; place-items: center; cursor: pointer;
+    transition: transform var(--t-fast) var(--ease-spring), background var(--t-fast) ease; }
+  #taskIsland button:active { transform: scale(.86); }
+  #taskIsland svg { width: 19px; height: 19px; display: block; fill: currentColor; }
+
+  .ti-l1 { display: flex; align-items: center; gap: 6px; width: 100%; }
+  .ti-l2 { display: flex; align-items: center; gap: 6px; width: 100%; }
+
+  .ti-ico { width: 38px; height: 38px; border-radius: 12px; flex: none; }
+  .ti-ico:hover { background: rgba(255, 255, 255, .07); }
+  .ti-start svg { width: 20px; height: 20px; }
+  .ti-start { color: #dbe7f3; }
+  .ti-more, .ti-back { color: #9fb0c2; }
+
+  .ti-recent { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+
+  .ti-app {
+    width: 38px; height: 38px; border-radius: 12px; flex: none;
+    position: relative;
+    display: grid; place-items: center;
+    background: transparent; border: none; padding: 0;
+    transition: transform var(--t-fast) var(--ease-spring), background var(--t-fast) ease;
+  }
+  .ti-app img { width: 27px; height: 27px; pointer-events: none;
+    border-radius: 7px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
+  .ti-app:active { transform: scale(.86); }
+  .ti-app.active { background: rgba(62, 207, 142, .14); }
+  .ti-app.active::after {
+    content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%; background: #3ecf8e;
+    box-shadow: 0 0 8px rgba(62, 207, 142, .8);
+  }
+  .ti-app.min::before {
+    content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+    width: 6px; height: 2px; border-radius: 1px; background: rgba(159, 176, 194, .55);
+  }
+  .ti-app.ghost img { opacity: .5; }
+
+  /* 二级菜单 */
+  #taskIsland.l2 { width: min(94vw, 360px); height: 96px; border-radius: 26px; }
+  #taskIsland.l2 .ti-l1 { display: none; }
+  .ti-grid {
+    display: flex; align-items: center; gap: 4px;
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    flex: 1 1 auto; min-width: 0;
+    padding: 4px 2px;
+  }
+  .ti-grid::-webkit-scrollbar { display: none; }
+
+  /* 一级/二级切换：内容淡入淡出，避免硬切 */
+  .ti-l2 { opacity: 0; transition: opacity .22s ease; }
+  #taskIsland.l2 .ti-l2 { opacity: 1; }

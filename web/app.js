@@ -29,9 +29,11 @@
       latEl.textContent = '-- ms';
       ping();
       send({ t: 'cfg', abs: S.abs });
+      tiSetConnected(true);
     };
     ws.onclose = () => {
       connected = false;
+      tiSetConnected(false);
       dot.classList.remove('on');
       latEl.textContent = '已断开，重连中…';
       setTimeout(connect, Math.min(800 * Math.pow(1.7, tries++), 8000));
@@ -277,6 +279,190 @@
     if (e.target.closest('button')) return;
     expandIsland(!island.classList.contains('exp'));
   });
+  /* ---------------- 任务栏卡片（和灵动岛堆叠） ---------------- */
+  const taskIsland = document.getElementById('taskIsland');
+  const tiRecent = document.getElementById('tiRecent');
+  const tiGrid = document.getElementById('tiGrid');
+  const tiMoreBtn = document.getElementById('tiMore');
+  const tiBackBtn = document.getElementById('tiBack');
+  const tiStartBtn = document.getElementById('tiStart');
+
+  const TI_STACK_DY = 16;       // 背卡露出的高度
+  const TI_SWITCH_PX = 38;      // 拖动超过这个距离就切换
+  let tiTasks = [];
+  let tiLevel = 1;
+  let islFront = 'music';       // 'music' | 'tasks'
+  let tiDrag = null;
+  let tiSwallowClick = 0;       // 刚拖过，吃掉这次 click
+
+  function tiPair() {
+    return islFront === 'music'
+      ? { front: island, back: taskIsland }
+      : { front: taskIsland, back: island };
+  }
+
+  // 把两张卡摆到「堆叠」位置。dy 是拖动偏移，动画开关决定用不用过渡
+  function tiApplyStack(dy, anim) {
+    const { front, back } = tiPair();
+    const tr = anim
+      ? 'transform .46s cubic-bezier(.34,1.32,.52,1), opacity .3s ease'
+      : 'none';
+    front.style.transition = tr;
+    back.style.transition = tr;
+
+    const ad = Math.abs(dy);
+    const fs = Math.max(0.84, 1 - ad / 620);
+    const bs = Math.min(1, 0.9 + ad / 900);
+
+    // 谁在前谁压在上面，否则背卡的图会穿到前排卡上
+    front.style.zIndex = '71';
+    back.style.zIndex = '69';
+
+    front.style.transform = `translateX(-50%) translateY(${dy}px) scale(${fs})`;
+    front.style.opacity = String(Math.max(0, 1 - ad / 170));
+    back.style.transform = `translateX(-50%) translateY(${TI_STACK_DY - dy * 0.62}px) scale(${bs})`;
+    // 背卡只露出下沿那一小条，不要太透，不然内容会糊在一起
+    back.style.opacity = String(Math.min(1, 0.28 + ad / 80));
+  }
+
+  function tiSettle(anim) {
+    const musicOn = island.classList.contains('on');
+    if (!musicOn) islFront = 'tasks';
+    const { front, back } = tiPair();
+    front.style.pointerEvents = 'auto';
+    back.style.pointerEvents = 'auto';
+    tiApplyStack(0, anim !== false);
+    taskIsland.classList.toggle('front', islFront === 'tasks');
+  }
+
+  function tiSetConnected(on) {
+    taskIsland.classList.toggle('on', !!on);
+    if (on) { tiSettle(false); refreshTasks(); }
+  }
+
+  function tiSwitch() {
+    const { front, back } = tiPair();
+    const dir = tiDrag && tiDrag.dy < 0 ? -1 : 1;
+    const tr = 'transform .4s cubic-bezier(.3,.9,.35,1), opacity .34s ease';
+    front.style.transition = tr;
+    back.style.transition = tr;
+    front.style.transform = `translateX(-50%) translateY(${dir * 92}px) scale(.9)`;
+    front.style.opacity = '0';
+    back.style.transform = 'translateX(-50%) translateY(0) scale(1)';
+    back.style.opacity = '1';
+    setTimeout(() => {
+      islFront = islFront === 'music' ? 'tasks' : 'music';
+      // 切换后把新的背卡摆回去（不带动画，避免闪一下）
+      tiSettle(false);
+      setTimeout(() => tiSettle(true), 20);
+    }, 380);
+  }
+
+  // ---- 拖动切换 ----
+  [island, taskIsland].forEach((el) => {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      if (el === island && island.classList.contains('exp')) return;
+      if (el === taskIsland && tiLevel === 2 && e.target.closest('.ti-grid')) return;
+      tiDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId, dy: 0, t0: performance.now() };
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      const { front, back } = tiPair();
+      front.style.transition = 'none';
+      back.style.transition = 'none';
+    }, { passive: true });
+
+    el.addEventListener('pointermove', (e) => {
+      if (!tiDrag || e.pointerId !== tiDrag.id) return;
+      tiDrag.dy = e.clientY - tiDrag.y0;
+      tiApplyStack(tiDrag.dy, false);
+    }, { passive: true });
+
+    const end = (e) => {
+      if (!tiDrag || e.pointerId !== tiDrag.id) return;
+      const dy = tiDrag.dy;
+      const dt = Math.max(1, performance.now() - tiDrag.t0);
+      const speed = Math.abs(dy) / dt;
+      tiDrag = null;
+      if (Math.abs(dy) > TI_SWITCH_PX || speed > 0.45) {
+        tiSwallowClick = performance.now() + 400;
+        tiSwitch();
+      } else {
+        if (Math.abs(dy) > 4) tiSwallowClick = performance.now() + 300;
+        tiSettle(true);
+      }
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  });
+
+  // 拖过之后吃掉 click，别让「拖一下」变成「点一下展开播放器」
+  island.addEventListener('click', (e) => {
+    if (performance.now() < tiSwallowClick) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
+  // ---- 任务栏渲染 ----
+  function tiIconEl(item) {
+    const b = document.createElement('button');
+    b.className = 'ti-app' + (item.active ? ' active' : '') + (item.min ? ' min' : '');
+    b.dataset.h = item.h;
+    b.title = item.title || item.exe || '';
+    const img = document.createElement('img');
+    img.src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(item.exe || '')}`;
+    img.alt = '';
+    img.draggable = false;
+    img.addEventListener('error', () => { b.classList.add('ghost'); });
+    b.appendChild(img);
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      send({ t: 'act', h: item.h });
+      b.classList.add('on');
+      setTimeout(() => b.classList.remove('on'), 160);
+      setTimeout(refreshTasks, 280);
+    });
+    return b;
+  }
+
+  async function refreshTasks() {
+    try {
+      const r = await fetch(`/tasks?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
+      const d = await r.json();
+      tiTasks = Array.isArray(d.list) ? d.list : [];
+    } catch (_) {
+      return;
+    }
+    tiPaint();
+  }
+
+  function tiPaint() {
+    tiRecent.innerHTML = '';
+    tiTasks.slice(0, 4).forEach((it) => tiRecent.appendChild(tiIconEl(it)));
+    tiGrid.innerHTML = '';
+    tiTasks.forEach((it) => tiGrid.appendChild(tiIconEl(it)));
+  }
+
+  function tiSetLevel(n) {
+    tiLevel = n;
+    taskIsland.classList.toggle('l2', n === 2);
+    if (n === 2) { refreshTasks(); }
+    setTimeout(tiSettle, 20);
+  }
+
+  tiMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(2); });
+  tiBackBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(1); });
+  tiStartBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    send({ t: 'k', vk: 0x5B });
+    setTimeout(refreshTasks, 600);
+  });
+
+  setInterval(() => {
+    if (!connected) return;
+    if (tiLevel === 2 || islFront === 'tasks') refreshTasks();
+  }, 3000);
+
   const lyricsEl = document.getElementById('lyrics');
   const lyricInner = document.getElementById('lyricInner');
 

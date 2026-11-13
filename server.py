@@ -292,6 +292,8 @@ def handle_message(msg):
         act_zoom(int(msg.get("d") or 0))
     elif t == "dblstart":
         act_drag_start()
+    elif t == "act":
+        activate_window(msg.get("h"))
     elif t == "mctl":
         a = str(msg.get("a") or "")
         if a == "playpause":
@@ -1507,6 +1509,36 @@ class Handler(socketserver.BaseRequestHandler):
                            "application/json; charset=utf-8")
                 return
 
+            if method == "GET" and path == "/tasks":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"{}", "application/json")
+                    return
+                body = json.dumps(tasks_payload(), ensure_ascii=False).encode("utf-8")
+                self._http(sock, 200, body, "application/json; charset=utf-8")
+                return
+
+            if method == "GET" and path == "/icon":
+                if not self._key_ok(key, self.client_address[0]):
+                    self._http(sock, 403, b"", "image/png")
+                    return
+                want = params.get("h", [""])[0]
+                png = None
+                try:
+                    for r in _enum_windows():
+                        if r["exe"] == want and r["path"]:
+                            png = icon_png(r["path"])
+                            break
+                    if not png and want:
+                        # 允许直接传 exe 的绝对路径哈希之外的场景：按进程名兜底找不到就空
+                        png = None
+                except Exception:
+                    png = None
+                if not png:
+                    self._http(sock, 404, b"", "image/png")
+                    return
+                self._http(sock, 200, png, "image/png", extra={"Cache-Control": "max-age=600"})
+                return
+
             if method == "GET" and path == "/imestate":
                 if not self._key_ok(key, self.client_address[0]):
                     self._http(sock, 403, b"{}", "application/json")
@@ -1999,6 +2031,256 @@ def launch_center():
     except Exception as exc:
         msgbox("启动控制中心失败:\n" + str(exc))
         return 1
+
+
+# ---------------- 任务栏：窗口列表 / 图标 / 切换 ----------------
+
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+gdi32.GetObjectW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p]
+gdi32.GetObjectW.restype = ctypes.c_int
+gdi32.GetDIBits.argtypes = [wintypes.HDC, wintypes.HANDLE, wintypes.UINT, wintypes.UINT,
+                            ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+gdi32.GetDIBits.restype = ctypes.c_int
+user32.GetIconInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+user32.GetIconInfo.restype = wintypes.BOOL
+user32.EnumWindows.argtypes = [
+    ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM), wintypes.LPARAM]
+user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.DrawIconEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.HICON,
+                              ctypes.c_int, ctypes.c_int, wintypes.UINT, wintypes.HBRUSH,
+                              wintypes.UINT]
+user32.DestroyIcon.argtypes = [wintypes.HICON]
+shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                                   ctypes.POINTER(wintypes.HICON),
+                                   ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+
+_GWL_EXSTYLE = -20
+_WS_EX_TOOLWINDOW = 0x00000080
+_WS_EX_APPWINDOW = 0x00040000
+_SKIP_EXE = {"textinputhost.exe", "shellexperiencehost.exe", "searchapp.exe",
+             "applicationframehost.exe", "padtrack.exe", "pickerhost.exe",
+             "lockapp.exe", "dwm.exe", "explorer.exe", "nvidia share.exe"}
+_SKIP_TITLE = {"Windows 输入体验", "Program Manager", "设置", "Microsoft Text Input Application"}
+
+_icon_cache = {}      # exe -> (md5, png)
+_icon_lock = threading.Lock()
+
+
+def _exe_of(pid):
+    try:
+        h = kernel32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return ""
+        buf = ctypes.create_unicode_buffer(600)
+        size = wintypes.DWORD(600)
+        ok = kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+        kernel32.CloseHandle(h)
+        return buf.value if ok else ""
+    except Exception:
+        return ""
+
+
+def _enum_windows():
+    rows = []
+
+    def cb(hwnd, _):
+        try:
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            n = user32.GetWindowTextLengthW(hwnd)
+            if n <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            title = (buf.value or "").strip()
+            if not title or title in _SKIP_TITLE:
+                return True
+            ex = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+            if (ex & _WS_EX_TOOLWINDOW) and not (ex & _WS_EX_APPWINDOW):
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            path = _exe_of(pid.value)
+            exe = os.path.basename(path) if path else ""
+            if exe.lower() in _SKIP_EXE:
+                return True
+            rows.append({"h": int(hwnd), "title": title[:60], "exe": exe,
+                         "path": path, "min": bool(user32.IsIconic(hwnd))})
+        except Exception:
+            pass
+        return True
+
+    user32.EnumWindows(ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(cb), 0)
+    return rows
+
+
+def _png(w, h, rgba):
+    """最小的 PNG 编码（RGBA），不引入 PIL。"""
+    import struct
+    import zlib
+    raw = b"".join(b"\x00" + rgba[y * w * 4:(y + 1) * w * 4] for y in range(h))
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 6))
+            + chunk(b"IEND", b""))
+
+
+class _BITMAP(ctypes.Structure):
+    _fields_ = [("bmType", ctypes.c_long), ("bmWidth", ctypes.c_long),
+                ("bmHeight", ctypes.c_long), ("bmWidthBytes", ctypes.c_long),
+                ("bmPlanes", wintypes.WORD), ("bmBitsPixel", wintypes.WORD),
+                ("bmBits", ctypes.c_void_p)]
+
+
+class _BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long),
+                ("biHeight", ctypes.c_long), ("biPlanes", wintypes.WORD),
+                ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", ctypes.c_long),
+                ("biYPelsPerMeter", ctypes.c_long), ("biClrUsed", wintypes.DWORD),
+                ("biClrImportant", wintypes.DWORD)]
+
+
+class _ICONINFO(ctypes.Structure):
+    _fields_ = [("fIcon", wintypes.BOOL), ("xHotspot", wintypes.DWORD),
+                ("yHotspot", wintypes.DWORD), ("hbmMask", wintypes.HBITMAP),
+                ("hbmColor", wintypes.HBITMAP)]
+
+
+def icon_png(exe_path, size=32):
+    """从可执行文件取图标，返回 PNG 字节；失败返回 None。
+
+    关键：不能把图标 DrawIconEx 画到 DIB 上——GDI 绘制不写 alpha，
+    透明区域会变成不透明方块。要从 hbmColor 位图直接读 32 位像素。
+    """
+    if not exe_path or not os.path.exists(exe_path):
+        return None
+    key = exe_path.lower()
+    try:
+        stamp = os.path.getmtime(exe_path)
+    except OSError:
+        stamp = 0
+    with _icon_lock:
+        hit = _icon_cache.get(key)
+        if hit and hit[0] == stamp:
+            return hit[1]
+
+    large = wintypes.HICON()
+    if shell32.ExtractIconExW(exe_path, 0, ctypes.byref(large), None, 1) <= 0 or not large:
+        return None
+    hicon = large
+    ii = _ICONINFO()
+    try:
+        if not user32.GetIconInfo(hicon, ctypes.byref(ii)):
+            return None
+        bm = _BITMAP()
+        if not gdi32.GetObjectW(ii.hbmColor, ctypes.sizeof(_BITMAP), ctypes.byref(bm)):
+            return None
+        w, h = int(bm.bmWidth), int(bm.bmHeight)
+        if w <= 0 or h <= 0:
+            return None
+
+        def bits_of(hbm):
+            bmi = _BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+            bmi.biWidth = w
+            bmi.biHeight = -h
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0
+            buf = ctypes.create_string_buffer(w * h * 4)
+            hdc = gdi32.CreateCompatibleDC(None)
+            n = gdi32.GetDIBits(hdc, hbm, 0, h, buf, ctypes.byref(bmi), 0)
+            gdi32.DeleteDC(hdc)
+            return buf.raw if n else None
+
+        raw = bits_of(ii.hbmColor)
+        if not raw:
+            return None
+        out = bytearray(len(raw))
+        out[0::4] = raw[2::4]      # B → R
+        out[1::4] = raw[1::4]      # G → G
+        out[2::4] = raw[0::4]      # R → B
+        out[3::4] = raw[3::4]      # A
+        if not any(out[3::4]):
+            # 老式无 alpha 图标：用 mask 反推（mask 为 1 表示透明）
+            mraw = bits_of(ii.hbmMask)
+            if mraw:
+                for i in range(w * h):
+                    out[i * 4 + 3] = 0 if mraw[i * 4] else 255
+        png = _png(w, h, bytes(out))
+        with _icon_lock:
+            _icon_cache[key] = (stamp, png)
+        return png
+    except Exception:
+        return None
+    finally:
+        try:
+            if hicon:
+                user32.DestroyIcon(hicon)
+        except Exception:
+            pass
+
+
+def tasks_payload():
+    """任务栏数据：Z 序就是最近使用顺序。"""
+    rows = _enum_windows()
+    fg = user32.GetForegroundWindow()
+    out = []
+    for i, r in enumerate(rows):
+        out.append({"h": r["h"], "title": r["title"], "exe": r["exe"],
+                    "min": r["min"], "active": r["h"] == int(fg or 0)})
+    return {"list": out, "count": len(out)}
+
+
+def _alt_nudge():
+    """前台锁常用的解法规矩：先发一次 Alt 键，再抢前台。"""
+    try:
+        _key(VK["alt"], 0, 0)
+        _key(VK["alt"], 0, KEYEVENTF_KEYUP)
+        time.sleep(0.02)
+    except Exception:
+        pass
+
+
+def activate_window(hwnd):
+    """点图标：不在前台就切过去，已经在前台就最小化。"""
+    try:
+        hwnd = int(hwnd)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "bad_hwnd"}
+    try:
+        fg = int(user32.GetForegroundWindow() or 0)
+        if fg == hwnd:
+            user32.ShowWindow(hwnd, 6)      # SW_MINIMIZE
+            return {"ok": True, "action": "minimize"}
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+        else:
+            user32.ShowWindow(hwnd, 5)      # SW_SHOW
+        user32.BringWindowToTop(hwnd)
+        if not user32.SetForegroundWindow(hwnd):
+            _alt_nudge()
+            user32.SetForegroundWindow(hwnd)
+        ok = int(user32.GetForegroundWindow() or 0) == hwnd
+        return {"ok": ok, "action": "activate"}
+    except Exception as e:
+        return {"ok": False, "reason": str(e)[:60]}
 
 
 def ime_state():

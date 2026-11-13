@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>PadTrack 触控板</title>
-<link rel="stylesheet" href="app.css?v=1164">
+<link rel="stylesheet" href="app.css?v=1166">
 </head>
 <body>
 
@@ -71,6 +71,24 @@
   <div id="bgCoverA" class="bgimg"></div>
   <div id="bgCoverB" class="bgimg"></div>
   <i class="bgscrim"></i>
+</div>
+
+<div id="taskIsland" aria-label="任务栏">
+  <div class="ti-l1">
+    <button class="ti-ico ti-start" id="tiStart" aria-label="开始菜单">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="8" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/><rect x="13" y="13" width="8" height="8" rx="1.2"/></svg>
+    </button>
+    <div class="ti-recent" id="tiRecent"></div>
+    <button class="ti-ico ti-more" id="tiMore" aria-label="所有窗口">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="1.9"/><circle cx="12" cy="6" r="1.9"/><circle cx="18" cy="6" r="1.9"/><circle cx="6" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="18" cy="12" r="1.9"/><circle cx="6" cy="18" r="1.9"/><circle cx="12" cy="18" r="1.9"/><circle cx="18" cy="18" r="1.9"/></svg>
+    </button>
+  </div>
+  <div class="ti-l2" id="tiL2">
+    <button class="ti-ico ti-back" id="tiBack" aria-label="返回">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 7.5 12l7 7" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="ti-grid" id="tiGrid"></div>
+  </div>
 </div>
 
 <div id="sheetMask"></div>
@@ -181,6 +199,6 @@
   </div>
 </div>
 
-<script src="app.js?v=1164"></script>
+<script src="app.js?v=1166"></script>
 </body>
 </html>
