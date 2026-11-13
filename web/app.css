@@ -1338,18 +1338,18 @@ html.glass-light {
   /* ================= 灵动岛设置：扑克摊牌 ================= */
   .islandcfg {
     position: fixed; inset: 0; z-index: 92; display: none;
+    opacity: 0; transition: opacity .26s ease;
     background: rgba(3, 5, 8, .52);
     backdrop-filter: blur(24px) saturate(140%);
     -webkit-backdrop-filter: blur(24px) saturate(140%);
   }
-  .islandcfg.on { display: block; }
+  .islandcfg.on { display: block; opacity: 1; }
   .fanstage { position: absolute; inset: 0; }
 
   /* 摊开的牌 = 灵动岛同款卡片（尺寸/玻璃/圆角全部复用 .island-card） */
   .fanstage .island-card {
-    position: absolute; left: 50%; top: 50%;
-    margin-left: calc(var(--card-w) / -2);
-    margin-top: calc(var(--card-h) / -2);
+    /* 位置由 JS 按灵动岛当前矩形设置，保证从岛上长出来 */
+    position: absolute; left: 0; top: 0; margin: 0;
     width: var(--card-w); height: var(--card-h);
     opacity: 1; pointer-events: auto;
     display: flex; align-items: center; gap: 8px;

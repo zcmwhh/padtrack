@@ -308,6 +308,7 @@
   const ISLAND_SWITCH = 16;    // 松手时位移超过这个就翻页
   const ISLAND_SLOP = 6;       // 超过这个算滑动，不再当点击
   let islandPos = 0;           // 浮点索引：0 = 第一张在前
+  let islandHidden = false;    // 摊牌面板打开时把真岛藏起来（否则两层文字会透）
   let islandActive = -1;
   let islandDrag = null;
   let islandSwallowClick = 0;
@@ -363,7 +364,7 @@
       c.el.style.transition = tr;
       c.el.style.transform =
         `translateX(-50%) translateY(${y.toFixed(2)}px) scale(${sc.toFixed(3)})`;
-      c.el.style.opacity = String(op);
+      c.el.style.opacity = (c.el === island && islandHidden) ? '0' : String(op);
       c.el.style.zIndex = front ? '71' : '69';
       c.el.style.pointerEvents = (front && op > 0.8) ? 'auto' : 'none';
       c.el.classList.toggle('front', front);
@@ -1127,10 +1128,21 @@
     window.addEventListener('pointercancel', fanPressEnd, true);
   }
 
-  // 每张卡的目标 Y（以整组居中）
+  // 第一张牌就压在灵动岛上（y=0），后面的依次往下排
   function fanTargetY(i, n) {
-    const offset = -((n - 1) * FAN_STEP) / 2;
-    return offset + i * FAN_STEP;
+    return i * FAN_STEP;
+  }
+
+  // 把每张牌摆到灵动岛的位置和尺寸上
+  function fanAlignToIsland() {
+    if (!island) return;
+    const r = island.getBoundingClientRect();
+    fanMap.forEach((el) => {
+      el.style.left = r.left + 'px';
+      el.style.top = r.top + 'px';
+      el.style.width = r.width + 'px';
+      el.style.height = r.height + 'px';
+    });
   }
 
   function fanLayout(animate, delayBase) {
@@ -1295,8 +1307,15 @@
     // 灵动岛先自动翻到第一张卡
     islandPos = 0;
     islandPaint(true);
+    // 真岛先藏起来：第一张牌就在它原位，玻璃是半透明的，不藏会透出两层文字
+    islandHidden = true;
+    island.style.opacity = '0';
+    island.style.pointerEvents = 'none';
 
-    // 所有牌先叠在灵动岛的位置（同一处），再一张张向下摊开
+    // 对齐到灵动岛当前的位置：第一张就盖在岛上，看起来是「从岛上长出来」
+    fanAlignToIsland();
+
+    // 所有牌先叠在一起（都在灵动岛原位），再一张张向下摊开
     const ids = cfgOrdered().map((c) => c.id);
     const n = ids.length;
     ids.forEach((id) => {
@@ -1334,8 +1353,14 @@
     setTimeout(() => {
       cfgPanel.classList.remove('on');
       cfgPanel.setAttribute('aria-hidden', 'true');
+      islandHidden = false;
+      islandPaint(true);          // 真岛恢复显示
     }, 300);
   }
+
+  window.addEventListener('resize', () => {
+    if (cfgPanel && cfgPanel.classList.contains('on')) fanAlignToIsland();
+  });
 
   if (cfgDoneBtn) cfgDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgClosePanel(); });
   if (cfgPanel) {
