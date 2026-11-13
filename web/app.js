@@ -925,7 +925,11 @@
       });
       winMenu.appendChild(b);
     } else {
-      WIN_ACTIONS.forEach((act) => {
+      // 已经最大化的窗口：把「最大化」换成「还原窗口」
+      const acts = WIN_ACTIONS.map((a) => (
+        (a.a === 'max' && item.max) ? { a: 'restore', label: '向下还原' } : a
+      ));
+      acts.forEach((act) => {
         const b = document.createElement('button');
         b.textContent = act.label;
         if (act.danger) b.className = 'danger';

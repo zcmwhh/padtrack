@@ -2566,12 +2566,13 @@ def tasks_payload():
             icon = match["exe"] or ""
             used.add(match["h"])
             item = {"name": name, "icon": icon, "lnk": "", "h": match["h"],
-                    "running": True, "active": match["h"] == fg, "min": match["min"]}
+                    "running": True, "active": match["h"] == fg, "min": match["min"],
+                    "max": bool(user32.IsZoomed(match["h"]))}
         else:
             lnk = pins.get(name, "")
             icon = os.path.basename(lnk) if lnk else ""
             item = {"name": name, "icon": icon, "lnk": lnk, "h": 0,
-                    "running": False, "active": False, "min": False}
+                    "running": False, "active": False, "min": False, "max": False}
 
         # 图标解析不出来的幽灵条目（没有窗口、也没有固定快捷方式）直接丢
         if not icon:
@@ -2594,6 +2595,7 @@ def tasks_payload():
         seen_icons.add(icon_key(icon))
         extra.append({"name": r["title"], "icon": icon, "lnk": "", "h": r["h"],
                       "running": True, "active": r["h"] == fg, "min": r["min"],
+                      "max": bool(user32.IsZoomed(r["h"])),
                       "_key": "w%d" % r["h"]})
     extra.sort(key=lambda it: _task_seq(it["_key"]))
     out.extend(extra)
@@ -2618,7 +2620,7 @@ def tasks_payload():
                 pos = now_names.index(nxt)
                 break
         out.insert(pos, {"name": nm, "icon": icon, "lnk": lnk, "h": 0,
-                         "running": False, "active": False, "min": False,
+                         "running": False, "active": False, "min": False, "max": False,
                          "_key": "p" + icon})
         now_names = [it["name"] for it in out]
 
