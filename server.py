@@ -2329,8 +2329,28 @@ ConvertTo-Json -InputObject @($out) -Compress
 """
 
 
+_uia_cache = {"t": 0.0, "rows": []}
+
+
 def _taskbar_uia():
-    """读 Windows 任务栏真实按钮顺序（含固定但没运行的）。"""
+    """读 Windows 任务栏真实按钮顺序（含固定但没运行的）。
+
+    每次成功的结果缓存 20 秒；万一某次调用超时/失败，就拿上次的，
+    否则列表会在「完整」和「只有窗口」之间来回跳。
+    """
+    now = time.time()
+    cache = _uia_cache
+    if cache["rows"] and now - cache["t"] < 20:
+        return cache["rows"]
+    rows = _taskbar_uia_raw()
+    if rows:
+        cache["t"] = now
+        cache["rows"] = rows
+        return rows
+    return cache["rows"]
+
+
+def _taskbar_uia_raw():
     script = _ps_script(TASKBAR_PS, "taskbar")
     if not script:
         return []

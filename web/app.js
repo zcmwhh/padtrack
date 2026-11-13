@@ -294,7 +294,163 @@
     if (e.target.closest('button')) return;
     expandIsland(!island.classList.contains('exp'));
   });
-  /* ---------------- 任务栏卡片（和灵动岛堆叠） ---------------- */
+  /* ==================================================================
+   ISLAND CARDS —— 灵动岛卡片引擎
+   ------------------------------------------------------------------
+   新增灵动岛功能从这里开始，步骤见 docs/island-cards.md
+   规则：
+     1. 不要改 islandPaint / islandDrag 里的公式，用 registerIslandCard 注册
+     2. 卡片 DOM 必须是 <div class="island-card">，尺寸玻璃圆角由外壳保证
+     3. 数据拉取放 mount()/onActivate()，离开前台在 onDeactivate() 里停掉
+   ================================================================== */
+  const ISLAND_CARDS = [];
+  const ISLAND_DIST = 90;      // 拖多远等于走完一整张卡（手感）
+  const ISLAND_SWITCH = 16;    // 松手时位移超过这个就翻页
+  const ISLAND_SLOP = 6;       // 超过这个算滑动，不再当点击
+  let islandPos = 0;           // 浮点索引：0 = 第一张在前
+  let islandActive = -1;
+  let islandDrag = null;
+  let islandSwallowClick = 0;
+
+  const islandEase = (t) => t * t * (3 - 2 * t);
+  const islandClamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  function registerIslandCard(def) {
+    if (!def || !def.id || !def.el) throw new Error('[island] 卡片缺少 id 或 el');
+    if (ISLAND_CARDS.some((c) => c.id === def.id)) throw new Error('[island] 卡片 id 重复: ' + def.id);
+    def.order = def.order == null ? 100 : def.order;
+    def.el.classList.add('island-card');
+    def.el.dataset.card = def.id;
+    def.el.__islandCard = def;
+    def.available = def.available || (() => true);
+    ISLAND_CARDS.push(def);
+    ISLAND_CARDS.sort((a, b) => a.order - b.order);
+    return def;
+  }
+
+  // 当前参与堆叠的卡（available() 为 false 的自动退出，比如没歌时的音乐卡）
+  function islandLive() {
+    return ISLAND_CARDS.filter((c) => {
+      try { return c.available(); } catch (_) { return true; }
+    });
+  }
+
+  function islandPaint(anim) {
+    const cards = islandLive();
+    if (!cards.length) return;
+    islandPos = islandClamp(islandPos, 0, cards.length - 1);
+    const tr = anim ? 'var(--card-ease)' : 'none';
+
+    cards.forEach((c, i) => {
+      const k = i - islandPos;             // >0 在下面排队，<0 已经划走
+      let y, sc, op;
+      if (k >= 0) {
+        const e = islandClamp(k, 0, 1);
+        y = 12 * e;                        // 排队的卡露出 12px
+        sc = 1 - 0.08 * e;
+        op = 1 - 0.45 * e;
+      } else {
+        const e = islandClamp(-k, 0, 1);
+        y = -70 * e;                       // 划走的卡向上滑出
+        sc = 1 - 0.08 * e;
+        op = 1 - e;
+      }
+      const front = Math.abs(k) < 0.5;
+      c.el.style.transition = tr;
+      c.el.style.transform =
+        `translateX(-50%) translateY(${y.toFixed(2)}px) scale(${sc.toFixed(3)})`;
+      c.el.style.opacity = String(op);
+      c.el.style.zIndex = front ? '71' : '69';
+      c.el.style.pointerEvents = (front && op > 0.8) ? 'auto' : 'none';
+      c.el.classList.toggle('front', front);
+      c.el.classList.toggle('is-front', front);
+    });
+
+    // 激活回调：只通知变化
+    const nowActive = Math.round(islandPos);
+    if (nowActive !== islandActive) {
+      const prev = ISLAND_CARDS[islandActive];
+      const next = cards[nowActive];
+      islandActive = nowActive;
+      if (prev && prev.onDeactivate) { try { prev.onDeactivate(); } catch (_) {} }
+      if (next && next.onActivate) { try { next.onActivate(); } catch (_) {} }
+    }
+  }
+
+  // 外部状态变化（音乐出现/消失、连上服务器）后重排
+  function islandRefresh() { islandPaint(true); }
+
+  // ---- 拖动 ----
+  function islandOnMove(e) {
+    if (!islandDrag || e.pointerId !== islandDrag.id) return;
+    islandDrag.dy = e.clientY - islandDrag.y0;
+    const n = islandLive().length;
+    // 上滑 = 下一张，下滑 = 上一张
+    islandPos = islandClamp(islandDrag.base - islandDrag.dy / ISLAND_DIST, 0, Math.max(0, n - 1));
+    islandPaint(false);
+  }
+
+  function islandOnUp(e) {
+    if (!islandDrag || e.pointerId !== islandDrag.id) return;
+    window.removeEventListener('pointermove', islandOnMove, true);
+    window.removeEventListener('pointerup', islandOnUp, true);
+    window.removeEventListener('pointercancel', islandOnUp, true);
+
+    const dy = islandDrag.dy;
+    const base = islandDrag.base;
+    const dt = Math.max(1, performance.now() - islandDrag.t0);
+    islandDrag = null;
+
+    let target = base;
+    if (Math.abs(dy) > ISLAND_SLOP) islandSwallowClick = performance.now() + 360;
+    if (Math.abs(dy) > ISLAND_SWITCH || Math.abs(dy) / dt > 0.22) {
+      target = islandPos + (dy < 0 ? 0.35 : -0.35);     // 按方向吸附到相邻卡
+      target = Math.round(target);
+      islandSwallowClick = performance.now() + 460;
+    } else {
+      target = Math.round(base);
+    }
+    islandPos = target;
+    islandPaint(true);
+  }
+
+  function islandAttachDrag(el) {
+    el.addEventListener('pointerdown', (e) => {
+      if (el.classList.contains('exp')) return;
+      const card = el.__islandCard;
+      if (card && card.dragGuard && card.dragGuard(e)) return;   // 卡片自己说不拖（比如二级横向滚动区）
+      islandDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId,
+                     base: islandPos, dy: 0, t0: performance.now() };
+      // 不用 setPointerCapture：它会把 click 重定向到卡片本身，卡片里按钮就收不到
+      window.addEventListener('pointermove', islandOnMove, true);
+      window.addEventListener('pointerup', islandOnUp, true);
+      window.addEventListener('pointercancel', islandOnUp, true);
+      islandPaint(false);
+    }, { passive: true });
+
+    // 拖动后吃掉紧随其后的 click
+    el.addEventListener('click', (e) => {
+      if (performance.now() < islandSwallowClick) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true);
+  }
+
+  /* ---------------- 卡片 1：音乐（播放器本身） ---------------- */
+  if (island) {
+    registerIslandCard({
+      id: 'music',
+      order: 10,
+      title: '音乐',
+      el: island,
+      expandable: true,
+      available: () => island.classList.contains('on'),
+      onActivate: () => { if (typeof mqApply === 'function') mqApply(musicTitle); },
+    });
+  }
+
+  /* ---------------- 卡片 2：任务栏 ---------------- */
   const taskIsland = document.getElementById('taskIsland');
   const tiRecent = document.getElementById('tiRecent');
   const tiGrid = document.getElementById('tiGrid');
@@ -302,121 +458,13 @@
   const tiBackBtn = document.getElementById('tiBack');
   const tiStartBtn = document.getElementById('tiStart');
 
-  const TI_DIST = 90;          // 手感参数：拖这么远等于走完一整张卡
-  const TI_SWITCH = 16;        // 位移超过这个就切卡
-  const TI_SLOP = 6;           // 超过这个算滑动，不再当点击
-  // 过渡必须把宽高、圆角、背景都列上，否则内联 transition 会顶掉
-  // #island 的展开动画和 #taskIsland 的一级→二级动画
-  const TI_EASE = 'transform .5s cubic-bezier(.32,1.25,.45,1), opacity .32s ease,'
-    + ' width .34s cubic-bezier(.32,1.25,.45,1), height .34s cubic-bezier(.32,1.25,.45,1),'
-    + ' border-radius .34s ease, background .3s ease, box-shadow .3s ease';
-
   let tiTasks = [];
   let tiLevel = 1;
-  let stackPos = 0;            // 0 = 音乐在前，1 = 任务栏在前
-  let tiDrag = null;
-  let tiSwallowClick = 0;
-  // 两个容器各自一套节点缓存：同一个 button 不能同时挂在两处，
-  // 共用缓存的话二级一渲染就会把一级的按钮「挪走」，一级就空了
+  // 两个容器各自一套节点缓存：同一个 button 不能同时挂在两处
   const tiNodesL1 = new Map();
   const tiNodesL2 = new Map();
-  let tiSig = '';              // 列表签名
+  let tiSig = '';
 
-  const tiMusicOn = () => island.classList.contains('on');
-  const tiClamp = (v, a, b) => Math.min(b, Math.max(a, v));
-
-  // 插值模型：t=0 音乐在前（任务卡在下面露 12px），t=1 任务卡在前
-  const tiEase = (t) => t * t * (3 - 2 * t);
-
-  function tiPaint(anim) {
-    const t = tiMusicOn() ? stackPos : 1;
-    const e = tiEase(t);
-    const musicOn = tiMusicOn();
-    const taskOn = taskIsland.classList.contains('on');
-    const tr = anim ? TI_EASE : 'none';
-
-    // 音乐卡：从 0 滑到 -70 并淡出
-    const mOp = musicOn ? Math.max(0, 1 - t * 1.05) : 0;
-    island.style.transition = tr;
-    island.style.transform =
-      `translateX(-50%) translateY(${(-70 * e).toFixed(2)}px) scale(${(1 - 0.08 * e).toFixed(3)})`;
-    island.style.opacity = String(mOp);
-    island.style.zIndex = '70';
-    island.style.pointerEvents = (musicOn && mOp > .8) ? 'auto' : 'none';
-
-    // 任务卡：从 +12 归位到 0
-    const tOp = taskOn ? (0.55 + 0.45 * e) : 0;
-    taskIsland.style.transition = tr;
-    taskIsland.style.transform =
-      `translateX(-50%) translateY(${(12 * (1 - e)).toFixed(2)}px) scale(${(0.92 + 0.08 * e).toFixed(3)})`;
-    taskIsland.style.opacity = String(tOp);
-    taskIsland.style.zIndex = '69';
-    taskIsland.style.pointerEvents = (taskOn && tOp > .8) ? 'auto' : 'none';
-
-    taskIsland.classList.toggle('front', t > .5);
-    island.classList.toggle('front', t <= .5);
-  }
-
-  function tiSetConnected(on) {
-    taskIsland.classList.toggle('on', !!on);
-    if (on) { tiPaint(true); refreshTasks(); }
-  }
-
-  // ---- 拖动 ----
-  function tiOnMove(e) {
-    if (!tiDrag || e.pointerId !== tiDrag.id) return;
-    tiDrag.dy = e.clientY - tiDrag.y0;
-    // 上滑 = 下一张（背卡从下面上来），下滑 = 上一张
-    stackPos = tiClamp(tiDrag.base - tiDrag.dy / TI_DIST, 0, 1);
-    tiPaint(false);
-  }
-
-  function tiOnUp(e) {
-    if (!tiDrag || e.pointerId !== tiDrag.id) return;
-    window.removeEventListener('pointermove', tiOnMove, true);
-    window.removeEventListener('pointerup', tiOnUp, true);
-    window.removeEventListener('pointercancel', tiOnUp, true);
-
-    const dy = tiDrag.dy;
-    const base = tiDrag.base;
-    const dt = Math.max(1, performance.now() - tiDrag.t0);
-    tiDrag = null;
-
-    let target = base;
-    if (Math.abs(dy) > TI_SLOP) tiSwallowClick = performance.now() + 360;
-    if (Math.abs(dy) > TI_SWITCH || Math.abs(dy) / dt > 0.22) {
-      target = dy < 0 ? 1 : 0;
-      tiSwallowClick = performance.now() + 460;
-    }
-    stackPos = target;
-    tiPaint(true);              // 从当前位置弹到目标，全程连续，不会闪
-  }
-
-  [island, taskIsland].forEach((el) => {
-    el.addEventListener('pointerdown', (e) => {
-      if (el === island && island.classList.contains('exp')) return;
-      if (el === taskIsland && tiLevel === 2 && e.target.closest('.ti-grid')) return;
-      tiDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId, base: stackPos, dy: 0, t0: performance.now() };
-      // 不用 setPointerCapture：它会把 click 重定向到卡片本身，
-      // 卡片里按钮（WIN、图标）的 click 就收不到了
-      window.addEventListener('pointermove', tiOnMove, true);
-      window.addEventListener('pointerup', tiOnUp, true);
-      window.addEventListener('pointercancel', tiOnUp, true);
-      tiPaint(false);
-    }, { passive: true });
-  });
-
-  // 拖动后吃掉紧随其后的 click（否则会误触发「展开播放器」或点中图标）
-  [island, taskIsland].forEach((el) => {
-    el.addEventListener('click', (e) => {
-      if (performance.now() < tiSwallowClick) {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-    }, true);
-  });
-
-  // ---- 任务栏渲染（节点复用，避免图标闪烁）----
   function tiIconFor(item, cache) {
     const key = item.h ? ('w' + item.h) : ('p' + (item.icon || ''));
     let b = cache.get(key);
@@ -438,7 +486,6 @@
       });
       cache.set(key, b);
     }
-    // 图标地址可能变（同一个程序先固定后运行），改了才重设，避免闪烁
     const img = b.firstChild;
     const wantIcon = item.icon || '';
     const src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(wantIcon)}`;
@@ -453,7 +500,6 @@
   }
 
   function tiPlace(container, list, cache) {
-    // 只在顺序/成员变化时重排，平时只更新 class（图标不重建就不闪）
     const want = list.map((it) => (it.h ? 'w' + it.h : 'p' + (it.icon || '')));
     const have = [...container.children].map((c) => (c.__item ? (c.__item.h ? 'w' + c.__item.h : 'p' + (c.__item.icon || '')) : ''));
     const same = want.length === have.length && want.every((x, i) => x === have[i]);
@@ -479,19 +525,23 @@
       return;
     }
     const list = Array.isArray(d.list) ? d.list : [];
-    // 状态（active/min）要更新，但 DOM 不重建
     const sig = list.map((x) => (x.h ? 'w' + x.h : 'p' + (x.icon || '')) + ':' + (x.running ? 1 : 0)).join(',');
     tiTasks = list;
-    if (sig !== tiSig) { tiSig = sig; tiRender(); }
-    else { tiRender(); }
+    tiSig = sig;
+    tiRender();
   }
 
   function tiSetLevel(n) {
     tiLevel = n;
     taskIsland.classList.toggle('l2', n === 2);
     if (n === 2) refreshTasks();
-    // 高度变化交给 CSS transition（内联里已经带上了 height/width）
-    tiPaint(true);
+    islandPaint(true);
+  }
+
+  function tiSetConnected(on) {
+    taskIsland.classList.toggle('on', !!on);
+    if (on) { refreshTasks(); }
+    islandPaint(true);
   }
 
   tiMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(2); });
@@ -503,9 +553,28 @@
   });
 
   setInterval(() => {
-    if (!connected) return;
-    refreshTasks();
+    if (!connected || document.hidden) return;
+    const tasksFront = ISLAND_CARDS[Math.round(islandPos)] &&
+                       ISLAND_CARDS[Math.round(islandPos)].id === 'tasks';
+    if (tasksFront || tiLevel === 2) refreshTasks();
   }, 2500);
+
+  registerIslandCard({
+    id: 'tasks',
+    order: 20,
+    title: '任务栏',
+    el: taskIsland,
+    expandable: true,
+    available: () => taskIsland.classList.contains('on'),
+    onActivate: () => { refreshTasks(); },
+    // 二级菜单的图标区要横向滑动，别被卡片切换手势抢走
+    dragGuard: (e) => tiLevel === 2 && !!e.target.closest('.ti-grid'),
+  });
+
+  // 所有卡片挂上拖动
+  ISLAND_CARDS.forEach((c) => islandAttachDrag(c.el));
+  islandPaint(false);
+  console.info('[island] 已注册卡片:', ISLAND_CARDS.map((c) => c.id).join(', '));
 
   const lyricsEl = document.getElementById('lyrics');
   const lyricInner = document.getElementById('lyricInner');
@@ -705,6 +774,7 @@
       if (!d.title) {
         // 没在播放：胶囊和歌词一起收起来
         island.classList.remove('on');
+      islandRefresh();
         expandIsland(false);
         musicWave.classList.remove('playing');
         musicProg.style.width = '0%';
@@ -725,6 +795,7 @@
       }
 
       island.classList.add('on');
+      islandRefresh();
       musicTitle.textContent = d.title;
       requestAnimationFrame(() => mqApply(musicTitle));
       if (!window.__mqBound) {
