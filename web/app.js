@@ -250,6 +250,21 @@
   /* ---------------- 媒体信息 + 滚动歌词 ---------------- */
   const island = document.getElementById('island');
   const musicTitle = document.getElementById('musicTitle');
+  // 歌名跑马灯：量一下放不放得下，放不下才滚（放得下就别乱动）
+  function mqApply(el) {
+    if (!el) return;
+    el.classList.remove('mq');
+    el.style.removeProperty('--mq-dist');
+    const box = el.parentElement;
+    if (!box) return;
+    const avail = box.clientWidth;
+    const need = el.scrollWidth;
+    if (need <= avail + 2) return;
+    el.style.setProperty('--mq-dist', (need - avail + 6) + 'px');
+    el.style.setProperty('--mq-dur', Math.max(6, Math.min(16, need / 14)) + 's');
+    el.classList.add('mq');
+  }
+
   const musicArtist = document.getElementById('musicArtist');
   const musicCover = document.getElementById('musicCover');
   const musicCoverBig = document.getElementById('musicCoverBig');
@@ -711,6 +726,11 @@
 
       island.classList.add('on');
       musicTitle.textContent = d.title;
+      requestAnimationFrame(() => mqApply(musicTitle));
+      if (!window.__mqBound) {
+        window.__mqBound = true;
+        window.addEventListener('resize', () => mqApply(musicTitle));
+      }
       musicTitle.title = d.title;
       const titleFull = document.getElementById('musicTitleFull');
       if (titleFull) { titleFull.textContent = d.title; titleFull.title = d.title; }
