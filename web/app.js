@@ -403,35 +403,45 @@
 
   // ---- 任务栏渲染（节点复用，避免图标闪烁）----
   function tiIconFor(item, cache) {
-    let b = cache.get(item.h);
+    const key = item.h ? ('w' + item.h) : ('p' + (item.icon || ''));
+    let b = cache.get(key);
     if (!b) {
       b = document.createElement('button');
       b.className = 'ti-app';
       const img = document.createElement('img');
       img.alt = '';
       img.draggable = false;
-      img.src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(item.exe || '')}`;
-      img.addEventListener('error', () => b.classList.add('ghost'));
       b.appendChild(img);
       b.addEventListener('click', (e) => {
         e.stopPropagation();
-        send({ t: 'act', h: item.h });
-        setTimeout(refreshTasks, 300);
+        const it = b.__item || {};
+        if (it.running && it.h) send({ t: 'act', h: it.h });
+        else if (it.lnk || (it.icon || '').toLowerCase().endsWith('.lnk')) {
+          send({ t: 'run', p: it.icon });
+        }
+        setTimeout(refreshTasks, 320);
       });
-      cache.set(item.h, b);
+      cache.set(key, b);
     }
-    b.dataset.h = item.h;
-    b.title = item.title || item.exe || '';
+    // 图标地址可能变（同一个程序先固定后运行），改了才重设，避免闪烁
+    const img = b.firstChild;
+    const wantIcon = item.icon || '';
+    const src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(wantIcon)}`;
+    if (img && img.getAttribute('src') !== src && wantIcon) img.setAttribute('src', src);
+    b.__item = item;
+    b.dataset.h = item.h || 0;
+    b.title = item.name || item.icon || '';
     b.classList.toggle('active', !!item.active);
     b.classList.toggle('min', !!item.min);
+    b.classList.toggle('pinned', !item.running);
     return b;
   }
 
   function tiPlace(container, list, cache) {
     // 只在顺序/成员变化时重排，平时只更新 class（图标不重建就不闪）
-    const want = list.map((it) => it.h);
-    const have = [...container.children].map((c) => Number(c.dataset.h));
-    const same = want.length === have.length && want.every((h, i) => h === have[i]);
+    const want = list.map((it) => (it.h ? 'w' + it.h : 'p' + (it.icon || '')));
+    const have = [...container.children].map((c) => (c.__item ? (c.__item.h ? 'w' + c.__item.h : 'p' + (c.__item.icon || '')) : ''));
+    const same = want.length === have.length && want.every((x, i) => x === have[i]);
     if (!same) {
       container.innerHTML = '';
       list.forEach((it) => container.appendChild(tiIconFor(it, cache)));
@@ -455,7 +465,7 @@
     }
     const list = Array.isArray(d.list) ? d.list : [];
     // 状态（active/min）要更新，但 DOM 不重建
-    const sig = list.map((x) => x.h).join(',');
+    const sig = list.map((x) => (x.h ? 'w' + x.h : 'p' + (x.icon || '')) + ':' + (x.running ? 1 : 0)).join(',');
     tiTasks = list;
     if (sig !== tiSig) { tiSig = sig; tiRender(); }
     else { tiRender(); }

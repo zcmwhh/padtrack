@@ -294,6 +294,8 @@ def handle_message(msg):
         act_drag_start()
     elif t == "act":
         activate_window(msg.get("h"))
+    elif t == "run":
+        run_pinned(msg.get("p"))
     elif t == "mctl":
         a = str(msg.get("a") or "")
         if a == "playpause":
@@ -455,11 +457,13 @@ def _ps_script(text, name):
     文件名带内容哈希：脚本一改就会写新文件，不会像以前那样
     因为临时目录里留着旧版本而永远跑旧逻辑。
     """
-    digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
+    # 带中文的脚本必须存成 UTF-8 with BOM，
+    # 否则 PowerShell 5.1 会按 ANSI/GBK 读，中文全变成乱码导致语法错误
+    digest = hashlib.md5((text + "#bom").encode("utf-8")).hexdigest()[:10]
     path = os.path.join(tempfile.gettempdir(), f"padtrack_{name}_{digest}.ps1")
     if not os.path.exists(path):
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8-sig") as f:
                 f.write(text)
         except OSError:
             return ""
@@ -1524,13 +1528,21 @@ class Handler(socketserver.BaseRequestHandler):
                 want = params.get("h", [""])[0]
                 png = None
                 try:
-                    for r in _enum_windows():
-                        if r["exe"] == want and r["path"]:
-                            png = icon_png(r["path"])
-                            break
-                    if not png and want:
-                        # 允许直接传 exe 的绝对路径哈希之外的场景：按进程名兜底找不到就空
-                        png = None
+                    if want.lower().endswith(".lnk"):
+                        # 固定但没运行的程序：先解析快捷方式的目标，从目标 exe 取图标。
+                        # 直接对 .lnk 取图标会拿到带小箭头、白色底的快捷方式图标。
+                        base = want[:-4]
+                        info = _pin_exe_map().get(base) or {}
+                        target = info.get("target") if isinstance(info, dict) else ""
+                        if target and os.path.exists(target):
+                            png = icon_png(target)
+                        if not png:
+                            png = icon_png(os.path.join(_PIN_DIR, want))
+                    if not png:
+                        for r in _enum_windows():
+                            if r["exe"] == want and r["path"]:
+                                png = icon_png(r["path"])
+                                break
                 except Exception:
                     png = None
                 if not png:
@@ -2065,6 +2077,9 @@ user32.DrawIconEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes
                               ctypes.c_int, ctypes.c_int, wintypes.UINT, wintypes.HBRUSH,
                               wintypes.UINT]
 user32.DestroyIcon.argtypes = [wintypes.HICON]
+shell32.SHGetFileInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p,
+                                    wintypes.UINT, wintypes.UINT]
+shell32.SHGetFileInfoW.restype = ctypes.c_size_t
 shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
                                    ctypes.POINTER(wintypes.HICON),
                                    ctypes.POINTER(wintypes.HICON), wintypes.UINT]
@@ -2166,6 +2181,12 @@ def _png(w, h, rgba):
             + chunk(b"IEND", b""))
 
 
+class _SHFILEINFO(ctypes.Structure):
+    _fields_ = [("hIcon", wintypes.HICON), ("iIcon", ctypes.c_int),
+                ("dwAttributes", wintypes.DWORD), ("szDisplayName", wintypes.WCHAR * 260),
+                ("szTypeName", wintypes.WCHAR * 80)]
+
+
 class _BITMAP(ctypes.Structure):
     _fields_ = [("bmType", ctypes.c_long), ("bmWidth", ctypes.c_long),
                 ("bmHeight", ctypes.c_long), ("bmWidthBytes", ctypes.c_long),
@@ -2207,7 +2228,22 @@ def icon_png(exe_path, size=32):
             return hit[1]
 
     large = wintypes.HICON()
-    if shell32.ExtractIconExW(exe_path, 0, ctypes.byref(large), None, 1) <= 0 or not large:
+    got = 0
+    try:
+        got = shell32.ExtractIconExW(exe_path, 0, ctypes.byref(large), None, 1)
+    except Exception:
+        got = 0
+    if got <= 0 or not large:
+        # .lnk 这类没有图标资源，改用 shell 的图标
+        try:
+            sfi = _SHFILEINFO()
+            flags = 0x000000100 | 0x000000000   # SHGFI_ICON | SHGFI_LARGEICON
+            if shell32.SHGetFileInfoW(exe_path, 0, ctypes.byref(sfi),
+                                      ctypes.sizeof(_SHFILEINFO), flags):
+                large = sfi.hIcon
+        except Exception:
+            pass
+    if not large:
         return None
     hicon = large
     ii = _ICONINFO()
@@ -2263,14 +2299,202 @@ def icon_png(exe_path, size=32):
             pass
 
 
+TASKBAR_PS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$cond = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Shell_TrayWnd')
+$tray = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
+if (-not $tray) { '[]'; exit }
+$btnCond = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+  [System.Windows.Automation.ControlType]::Button)
+$skip = @('开始', '任务栏输入指示', '显示隐藏的图标', '通知', '网络', '音量', '电源', '时钟',
+          '安全中心', '后台运行的应用', '显示桌面', '任务视图')
+$out = @()
+foreach ($b in $tray.FindAll([System.Windows.Automation.TreeScope]::Descendants, $btnCond)) {
+  $n = $b.Current.Name
+  if (-not $n) { continue }
+  $hit = $false
+  foreach ($k in $skip) { if ($n.StartsWith($k)) { $hit = $true; break } }
+  if ($hit) { continue }
+  $pinned = $n -like '*已固定*'
+  $running = $n -like '*个运行窗口*'
+  $clean = $n -replace '\s*-\s*\d+\s*个运行窗口', '' -replace '\s*已固定', ''
+  $out += [pscustomobject]@{ name = $clean.Trim(); pinned = $pinned; running = $running }
+}
+ConvertTo-Json -InputObject @($out) -Compress
+"""
+
+
+def _taskbar_uia():
+    """读 Windows 任务栏真实按钮顺序（含固定但没运行的）。"""
+    script = _ps_script(TASKBAR_PS, "taskbar")
+    if not script:
+        return []
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=8, creationflags=0x08000000,
+        ).stdout.strip()
+    except Exception:
+        return []
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        rows = []
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            name = (it.get("name") or "").strip()
+            if name:
+                rows.append({"name": name, "pinned": bool(it.get("pinned")),
+                             "running": bool(it.get("running"))})
+        return rows
+    return []
+
+
+_PIN_DIR = os.path.join(os.environ.get("APPDATA", ""),
+                        r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")
+_pin_cache = {"t": 0.0, "map": {}}
+
+
+PINTARGET_PS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dir = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+if (-not (Test-Path $dir)) { '[]'; exit }
+$sh = New-Object -ComObject WScript.Shell
+$out = @()
+foreach ($f in Get-ChildItem $dir -Filter *.lnk) {
+  $t = ''
+  try { $t = $sh.CreateShortcut($f.FullName).TargetPath } catch {}
+  $exe = ''
+  if ($t) { $exe = Split-Path $t -Leaf }
+  $out += [pscustomobject]@{ name = $f.BaseName; exe = $exe; target = $t }
+}
+ConvertTo-Json -InputObject @($out) -Compress
+"""
+
+_pin_exe_cache = {"t": 0.0, "map": {}}
+
+
+def _pin_exe_map():
+    """固定项名字 → 目标 exe 名。用一次 PowerShell 全部解析，缓存 5 分钟。"""
+    now = time.time()
+    if now - _pin_exe_cache["t"] < 300 and _pin_exe_cache["map"]:
+        return _pin_exe_cache["map"]
+    m = {}
+    script = _ps_script(PINTARGET_PS, "pintarget")
+    if script:
+        try:
+            out = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=10, creationflags=0x08000000,
+            ).stdout.strip()
+            for line in reversed(out.splitlines()):
+                line = line.strip()
+                if not line.startswith("["):
+                    continue
+                data = json.loads(line)
+                for it in data:
+                    nm = (it.get("name") or "").strip()
+                    ex = (it.get("exe") or "").strip()
+                    tg = (it.get("target") or "").strip()
+                    if nm and ex:
+                        m[nm] = {"exe": ex, "target": tg}
+                break
+        except Exception:
+            pass
+    _pin_exe_cache["t"] = now
+    _pin_exe_cache["map"] = m
+    return m
+
+
+def _pins():
+    """固定项名字 → .lnk 路径（取图标、启动用），缓存 60 秒。"""
+    now = time.time()
+    if now - _pin_cache["t"] < 60 and _pin_cache["map"]:
+        return _pin_cache["map"]
+    m = {}
+    try:
+        for fn in os.listdir(_PIN_DIR):
+            if fn.lower().endswith(".lnk"):
+                m[fn[:-4]] = os.path.join(_PIN_DIR, fn)
+    except OSError:
+        pass
+    _pin_cache["t"] = now
+    _pin_cache["map"] = m
+    return m
+
+
 def tasks_payload():
-    """任务栏数据：Z 序就是最近使用顺序。"""
+    """按 Windows 任务栏的顺序与成员返回（固定程序没运行也显示）。"""
     rows = _enum_windows()
-    fg = user32.GetForegroundWindow()
+    fg = int(user32.GetForegroundWindow() or 0)
+    pins = _pins()
+
+    try:
+        bars = _taskbar_uia()
+    except Exception:
+        bars = []
+
+    pin_exe = _pin_exe_map()
+
     out = []
-    for i, r in enumerate(rows):
-        out.append({"h": r["h"], "title": r["title"], "exe": r["exe"],
-                    "min": r["min"], "active": r["h"] == int(fg or 0)})
+    used = set()
+    for b in bars:
+        name = b["name"]
+        low = name.lower()
+        match = None
+
+        # 先按「固定项目标 exe」匹配：歌名标题的播放器也能对上
+        _pi = pin_exe.get(name) or {}
+        want_exe = ((_pi.get("exe") if isinstance(_pi, dict) else _pi) or "").lower()
+        if want_exe:
+            for r in rows:
+                if r["h"] in used:
+                    continue
+                if (r["exe"] or "").lower() == want_exe:
+                    match = r
+                    break
+        # 再按名字匹配
+        if not match:
+            for r in rows:
+                if r["h"] in used:
+                    continue
+                hay = ((r["title"] or "") + " " + (r["exe"] or "")).lower()
+                if low and low in hay:
+                    match = r
+                    break
+        if match:
+            used.add(match["h"])
+            out.append({"name": name, "icon": match["exe"] or "", "lnk": "",
+                        "h": match["h"], "running": True,
+                        "active": match["h"] == fg, "min": match["min"]})
+        else:
+            lnk = pins.get(name, "")
+            out.append({"name": name,
+                        "icon": (os.path.basename(lnk) if lnk else ""),
+                        "lnk": lnk, "h": 0, "running": False,
+                        "active": False, "min": False})
+
+    # UIA 没列到的窗口补最后（比如刚打开还没刷新）
+    for r in rows:
+        if r["h"] in used:
+            continue
+        out.append({"name": r["title"], "icon": r["exe"] or "", "lnk": "",
+                    "h": r["h"], "running": True,
+                    "active": r["h"] == fg, "min": r["min"]})
+
     return {"list": out, "count": len(out)}
 
 
@@ -2282,6 +2506,21 @@ def _alt_nudge():
         time.sleep(0.02)
     except Exception:
         pass
+
+
+def run_pinned(lnk_name):
+    """启动一个固定的程序。只接受任务栏固定目录里的文件名，避免变成任意命令执行。"""
+    name = os.path.basename(str(lnk_name or ""))
+    if not name.lower().endswith(".lnk"):
+        return {"ok": False, "reason": "bad_name"}
+    path = os.path.join(_PIN_DIR, name)
+    if not os.path.isfile(path):
+        return {"ok": False, "reason": "not_found"}
+    try:
+        os.startfile(path)          # noqa: S606 - 只允许上面校验过的 .lnk
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "reason": str(e)[:60]}
 
 
 def activate_window(hwnd):

@@ -1054,11 +1054,11 @@ html.glass-light {
     width: 248px; height: 46px; border-radius: 24px;
     padding: 0 6px;
     display: flex; align-items: center;
-    /* 和播放器岛完全同一套：同样底色、同样发丝边、同样模糊强度 */
-    background: rgba(13, 18, 24, .88);
-    border: 1px solid rgba(120, 150, 180, .16);
-    backdrop-filter: blur(16px) saturate(1.25);
-    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    /* 项目统一的浮层玻璃：#hud/.round/#numpad/#panel/#island 用的就是这一套 */
+    background: linear-gradient(180deg, var(--glass-top) 0%, var(--glass-bot) 100%);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
     box-shadow: 0 12px 34px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .05);
     transform: translateX(-50%) translateY(16px) scale(.9);
     opacity: 0; pointer-events: none;
