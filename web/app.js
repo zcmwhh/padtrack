@@ -1079,8 +1079,8 @@
   const FAN_STEP = 46;              // 每张卡错开的高度（卡高 48，所以略重叠）
   const fanMap = new Map();         // id → 卡片元素
   let fanBuilt = false;
-  let fanDrag = null;
   let fanPopFor = '';
+  let cfgOpenedAt = 0;         // 刚打开的一小段时间内，忽略“长按结束”带出来的 click
 
   function cfgSubtitle(id) {
     if (id === 'music') {
@@ -1116,16 +1116,44 @@
       el.appendChild(t);
       el.appendChild(sub);
 
-      el.addEventListener('pointerdown', (e) => fanPressStart(e, card.id));
-      el.addEventListener('click', (e) => e.stopPropagation());
+      // 右侧控制：上移 / 下移 / 显示隐藏
+      const ctrls = document.createElement('div');
+      ctrls.className = 'fan-ctrls';
+      const up = document.createElement('button');
+      up.className = 'fan-btn';
+      up.dataset.act = 'up';
+      up.textContent = '↑';
+      const down = document.createElement('button');
+      down.className = 'fan-btn';
+      down.dataset.act = 'down';
+      down.textContent = '↓';
+      const tg = document.createElement('button');
+      tg.className = 'fan-btn fan-toggle';
+      tg.dataset.act = 'toggle';
+      ctrls.appendChild(up);
+      ctrls.appendChild(down);
+      ctrls.appendChild(tg);
+      el.appendChild(ctrls);
+
+      up.addEventListener('click', (e) => { e.stopPropagation(); fanMove(card.id, -1); });
+      down.addEventListener('click', (e) => { e.stopPropagation(); fanMove(card.id, 1); });
+      tg.addEventListener('click', (e) => { e.stopPropagation(); fanToggle(card.id); });
+
+      // 点卡身 = 选中这张卡（点右侧按钮不算，否则会顺手把面板关掉）
+      el.addEventListener('click', (e) => {
+        if (performance.now() - cfgOpenedAt < 600) return;   // 长按松手带出来的 click
+        if (e.target.closest('.fan-ctrls')) return;
+        e.stopPropagation();
+        const live = islandLive();
+        const idx = live.findIndex((c) => c.id === card.id);
+        if (idx >= 0) { islandPos = idx; }
+        cfgClosePanel();
+      });
 
       fanStage.appendChild(el);
       fanMap.set(card.id, el);
     });
 
-    window.addEventListener('pointermove', fanPressMove, true);
-    window.addEventListener('pointerup', fanPressEnd, true);
-    window.addEventListener('pointercancel', fanPressEnd, true);
   }
 
   // 第一张牌就压在灵动岛上（y=0），后面的依次往下排
@@ -1158,7 +1186,16 @@
       if (sub) sub.textContent = cfgSubtitle(id);
       // 从「叠在中间 + 透明」的初始态恢复可见，否则摊开也看不见
       el.style.opacity = '1';
-      if (fanDrag && fanDrag.id === id) return;   // 正在拖的那张不动
+      // 控制按钮状态
+      const upB = el.querySelector('[data-act="up"]');
+      const downB = el.querySelector('[data-act="down"]');
+      const tgB = el.querySelector('[data-act="toggle"]');
+      if (upB) upB.disabled = i === 0;
+      if (downB) downB.disabled = i === n - 1;
+      if (tgB) {
+        tgB.textContent = hid ? '已隐藏' : '显示中';
+        tgB.classList.toggle('on', !hid);
+      }
 
       if (animate) {
         const d = (delayBase || 0) + i * 85;
@@ -1174,79 +1211,22 @@
     });
   }
 
-  // ---------- 长按拖动排序 ----------
-  function fanPressStart(e, id) {
-    if (!el_ok(e)) return;
-    const el = fanMap.get(id);
-    if (!el) return;
-    const startY = e.clientY;
-    const n = cfgOrdered().length;
-    const idx = cfgOrdered().findIndex((c) => c.id === id);
-    const baseY = fanTargetY(idx, Math.max(1, n));
-    const timer = setTimeout(() => {
-      fanDrag = { id, startY, baseY, el, moved: false, lastClientY: startY };
-      el.classList.add('dragging');
-      el.style.transition = 'none';
-      if (navigator.vibrate) navigator.vibrate(10);
-    }, 420);
-    fanDrag = null;
-    el.__press = { timer, startY, id };
-  }
-
-  function el_ok(e) {
-    return e.pointerType !== 'mouse' || e.buttons === 1;
-  }
-
-  function fanPressMove(e) {
-    // 还没进入拖动：移动超过阈值就取消长按
-    for (const el of fanMap.values()) {
-      if (el.__press) {
-        if (Math.abs(e.clientY - el.__press.startY) > 8) {
-          clearTimeout(el.__press.timer);
-          el.__press = null;
-        }
-      }
-    }
-    if (!fanDrag) return;
-    const dy = e.clientY - fanDrag.startY;
-    fanDrag.lastClientY = e.clientY;
-    if (Math.abs(dy) > 3) fanDrag.moved = true;
-    fanDrag.el.style.transform = `translate3d(0, ${fanDrag.baseY + dy}px, 0)`;
-  }
-
-  function fanPressEnd(e) {
-    // 清掉所有未触发的长按计时器
-    for (const el of fanMap.values()) {
-      if (el.__press) {
-        clearTimeout(el.__press.timer);
-        el.__press = null;
-      }
-    }
-    if (!fanDrag) return;
-    const drag = fanDrag;
-    fanDrag = null;
-    drag.el.classList.remove('dragging');
-    drag.el.style.transition = '';
-
-    // 计算落点索引
+  // ---------- 顺序与显隐 ----------
+  function fanMove(id, delta) {
     const ids = cfgOrdered().map((c) => c.id);
-    const n = ids.length;
-    const from = ids.indexOf(drag.id);
-    const centerY = drag.baseY + (drag.lastClientY - drag.startY);
-    const offset = -((n - 1) * FAN_STEP) / 2;
-    let to = Math.round((centerY - offset) / FAN_STEP);
-    to = Math.max(0, Math.min(n - 1, to));
+    const at = ids.indexOf(id);
+    const to = at + delta;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(at, 1)[0]);
+    cfgPrefs.order = ids;
+    cfgSave();
+    cfgApply();
+    fanLayout(true);          // 只改 transform，卡片自己滑过去
+  }
 
-    if (to !== from) {
-      ids.splice(to, 0, ids.splice(from, 1)[0]);
-      cfgPrefs.order = ids;
-      cfgSave();
-      cfgApply();
-    }
-    fanLayout(true);
-
-    // 松手后：右侧弹出「是否显示」
-    setTimeout(() => fanShowPop(drag.id), 160);
+  function fanToggle(id) {
+    cfgToggle(id);
+    fanLayout(false);
   }
 
   // ---------- 右侧显隐菜单 ----------
@@ -1330,6 +1310,7 @@
       el.classList.toggle('off', cfgPrefs.hidden.includes(id));
     });
 
+    cfgOpenedAt = performance.now();
     cfgPanel.classList.add('on');
     cfgPanel.setAttribute('aria-hidden', 'false');
     void cfgPanel.offsetWidth;
@@ -1365,6 +1346,7 @@
   if (cfgDoneBtn) cfgDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgClosePanel(); });
   if (cfgPanel) {
     cfgPanel.addEventListener('pointerdown', (e) => {
+      if (performance.now() - cfgOpenedAt < 600) return;
       if (e.target === cfgPanel || e.target === fanStage) {
         if (fanPopFor) { fanHidePop(); return; }
         cfgClosePanel();

@@ -1354,7 +1354,8 @@ html.glass-light {
     opacity: 1; pointer-events: auto;
     display: flex; align-items: center; gap: 8px;
     padding: 0 12px;
-    overflow: hidden;
+    /* 右侧控制按钮在卡片外面，不能裁切 */
+    overflow: visible;
     transition: transform .5s cubic-bezier(.32, 1.18, .4, 1), opacity .3s ease, box-shadow .2s ease;
     will-change: transform;
   }
@@ -1406,4 +1407,28 @@ html.glass-light {
   .cfgtip {
     position: absolute; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom));
     text-align: center; font-size: 11.5px; color: rgba(226, 236, 246, .42);
+  }
+
+  /* 每张卡右侧：上移 / 下移 / 显示 */
+  .fan-ctrls {
+    position: absolute; left: calc(100% + 10px); top: 50%;
+    transform: translateY(-50%);
+    display: flex; align-items: center; gap: 7px;
+    pointer-events: auto;
+  }
+  .fan-btn {
+    width: 34px; height: 34px; border-radius: 11px;
+    display: grid; place-items: center;
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 14px; line-height: 1;
+    transition: background .15s ease, transform .15s var(--ease-spring), opacity .15s ease;
+  }
+  .fan-btn:active { background: var(--glass-hover); transform: scale(.9); }
+  .fan-btn:disabled { opacity: .2; }
+  .fan-toggle { width: 54px; font-size: 12px; }
+  .fan-toggle.on {
+    background: rgba(74, 222, 128, .18);
+    border-color: rgba(74, 222, 128, .45);
+    color: #b7f7cd;
   }
