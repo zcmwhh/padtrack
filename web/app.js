@@ -711,6 +711,37 @@
   let clipTimer = 0;
   let clipItems = [];
 
+  // 点一下就发到电脑剪贴板；长按仍然是复制到平板
+  function bindClipChip(btn, text) {
+    let timer = 0;
+    let fired = false;
+    const clear = () => { clearTimeout(timer); timer = 0; };
+    btn.addEventListener('pointerdown', () => {
+      fired = false;
+      clear();
+      timer = setTimeout(() => {
+        fired = true;
+        timer = 0;
+        copyToTablet(text);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 480);
+    });
+    btn.addEventListener('pointerup', (e) => {
+      clear();
+      if (fired) { e.stopPropagation(); e.preventDefault(); }
+    });
+    btn.addEventListener('pointercancel', clear);
+    btn.addEventListener('pointerleave', clear);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (fired) return;
+      send({ t: 'clip.set', text });
+      flash('已复制到电脑剪贴板');
+      btn.classList.add('on');
+      setTimeout(() => btn.classList.remove('on'), 600);
+    });
+  }
+
   function clipPaint() {
     const list = clipItems || [];
     // 一级：最多 2 条
@@ -727,12 +758,7 @@
         const b = document.createElement('button');
         b.className = 'ci-chip';
         b.textContent = (it.text || '').replace(/\s+/g, ' ').slice(0, 16) || '(空)';
-        b.addEventListener('click', (e) => {
-          e.stopPropagation();
-          copyToTablet(it.text || '');
-          b.classList.add('on');
-          setTimeout(() => b.classList.remove('on'), 700);
-        });
+        bindClipChip(b, it.text || '');
         clipChips.appendChild(b);
       });
     }
@@ -751,12 +777,7 @@
         b.className = 'ci-chip wide';
         b.textContent = (it.text || '').replace(/\s+/g, ' ').slice(0, 40) || '(空)';
         b.title = it.text || '';
-        b.addEventListener('click', (e) => {
-          e.stopPropagation();
-          copyToTablet(it.text || '');
-          b.classList.add('on');
-          setTimeout(() => b.classList.remove('on'), 700);
-        });
+        bindClipChip(b, it.text || '');
         clipChips2.appendChild(b);
       });
     }
