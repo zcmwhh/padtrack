@@ -2037,6 +2037,8 @@ def launch_center():
 
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+
 gdi32.GetObjectW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p]
 gdi32.GetObjectW.restype = ctypes.c_int
 gdi32.GetDIBits.argtypes = [wintypes.HDC, wintypes.HANDLE, wintypes.UINT, wintypes.UINT,
@@ -2053,6 +2055,9 @@ user32.IsIconic.argtypes = [wintypes.HWND]
 user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.c_void_p]
+dwmapi.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
+                                         ctypes.c_void_p, wintypes.DWORD]
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.BringWindowToTop.argtypes = [wintypes.HWND]
@@ -2067,9 +2072,10 @@ shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
 _GWL_EXSTYLE = -20
 _WS_EX_TOOLWINDOW = 0x00000080
 _WS_EX_APPWINDOW = 0x00040000
+# 只排真正的系统壳窗口；资源管理器这类用户会用的窗口要显示
 _SKIP_EXE = {"textinputhost.exe", "shellexperiencehost.exe", "searchapp.exe",
              "applicationframehost.exe", "padtrack.exe", "pickerhost.exe",
-             "lockapp.exe", "dwm.exe", "explorer.exe", "nvidia share.exe"}
+             "lockapp.exe", "dwm.exe"}
 _SKIP_TITLE = {"Windows 输入体验", "Program Manager", "设置", "Microsoft Text Input Application"}
 
 _icon_cache = {}      # exe -> (md5, png)
@@ -2108,6 +2114,26 @@ def _enum_windows():
             ex = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
             if (ex & _WS_EX_TOOLWINDOW) and not (ex & _WS_EX_APPWINDOW):
                 return True
+            # UWP 应用会留一堆"挂着但不可见"的窗口，用 DWM 的 CLOAKED 属性排掉
+            try:
+                cloaked = wintypes.DWORD(0)
+                dwmapi.DwmGetWindowAttribute(wintypes.HWND(hwnd), 14,
+                                             ctypes.byref(cloaked), ctypes.sizeof(cloaked))
+                if cloaked.value:
+                    return True
+            except Exception:
+                pass
+            # 尺寸为 0 的也排掉（有些应用会留这种隐藏窗口）。
+            # 注意：最小化的窗口坐标是 -32000 那种，高度只剩二十几像素，
+            # 不能因此被过滤掉——那是任务栏上正常显示的图标。
+            try:
+                if not user32.IsIconic(hwnd):
+                    rc = wintypes.RECT()
+                    user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rc))
+                    if (rc.right - rc.left) < 40 or (rc.bottom - rc.top) < 30:
+                        return True
+            except Exception:
+                pass
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             path = _exe_of(pid.value)

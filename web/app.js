@@ -285,118 +285,113 @@
   const tiGrid = document.getElementById('tiGrid');
   const tiMoreBtn = document.getElementById('tiMore');
   const tiBackBtn = document.getElementById('tiBack');
+  const tiStartBtn = document.getElementById('tiStart');
 
-  const TI_STACK_DY = 16;       // 背卡露出的高度
-  const TI_SWITCH_PX = 18;      // 拖动超过这个距离就切换（原来 38，太难触发）
+  const TI_DIST = 90;          // 手感参数：拖这么远等于走完一整张卡
+  const TI_SWITCH = 16;        // 位移超过这个就切卡
+  const TI_SLOP = 6;           // 超过这个算滑动，不再当点击
+  // 过渡必须把宽高、圆角、背景都列上，否则内联 transition 会顶掉
+  // #island 的展开动画和 #taskIsland 的一级→二级动画
+  const TI_EASE = 'transform .5s cubic-bezier(.32,1.25,.45,1), opacity .32s ease,'
+    + ' width .34s cubic-bezier(.32,1.25,.45,1), height .34s cubic-bezier(.32,1.25,.45,1),'
+    + ' border-radius .34s ease, background .3s ease, box-shadow .3s ease';
+
   let tiTasks = [];
   let tiLevel = 1;
-  let islFront = 'music';       // 'music' | 'tasks'
+  let stackPos = 0;            // 0 = 音乐在前，1 = 任务栏在前
   let tiDrag = null;
-  let tiSwallowClick = 0;       // 刚拖过，吃掉这次 click
-  const TI_SLOP = 8;            // 超过这个位移才认定是滑动而不是点击
+  let tiSwallowClick = 0;
+  // 两个容器各自一套节点缓存：同一个 button 不能同时挂在两处，
+  // 共用缓存的话二级一渲染就会把一级的按钮「挪走」，一级就空了
+  const tiNodesL1 = new Map();
+  const tiNodesL2 = new Map();
+  let tiSig = '';              // 列表签名
 
-  function tiPair() {
-    return islFront === 'music'
-      ? { front: island, back: taskIsland }
-      : { front: taskIsland, back: island };
-  }
+  const tiMusicOn = () => island.classList.contains('on');
+  const tiClamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-  // 把两张卡摆到「堆叠」位置。dy 是拖动偏移，动画开关决定用不用过渡
-  function tiApplyStack(dy, anim) {
-    const { front, back } = tiPair();
-    const tr = anim
-      ? 'transform .46s cubic-bezier(.34,1.32,.52,1), opacity .3s ease'
-      : 'none';
-    front.style.transition = tr;
-    back.style.transition = tr;
+  // 插值模型：t=0 音乐在前（任务卡在下面露 12px），t=1 任务卡在前
+  const tiEase = (t) => t * t * (3 - 2 * t);
 
-    const ad = Math.abs(dy);
-    const fs = Math.max(0.84, 1 - ad / 620);
-    const bs = Math.min(1, 0.9 + ad / 900);
+  function tiPaint(anim) {
+    const t = tiMusicOn() ? stackPos : 1;
+    const e = tiEase(t);
+    const musicOn = tiMusicOn();
+    const taskOn = taskIsland.classList.contains('on');
+    const tr = anim ? TI_EASE : 'none';
 
-    // 谁在前谁压在上面，否则背卡的图会穿到前排卡上
-    front.style.zIndex = '71';
-    back.style.zIndex = '69';
+    // 音乐卡：从 0 滑到 -70 并淡出
+    const mOp = musicOn ? Math.max(0, 1 - t * 1.05) : 0;
+    island.style.transition = tr;
+    island.style.transform =
+      `translateX(-50%) translateY(${(-70 * e).toFixed(2)}px) scale(${(1 - 0.08 * e).toFixed(3)})`;
+    island.style.opacity = String(mOp);
+    island.style.zIndex = '70';
+    island.style.pointerEvents = (musicOn && mOp > .8) ? 'auto' : 'none';
 
-    front.style.transform = `translateX(-50%) translateY(${dy}px) scale(${fs})`;
-    front.style.opacity = String(Math.max(0, 1 - ad / 170));
-    back.style.transform = `translateX(-50%) translateY(${TI_STACK_DY - dy * 0.62}px) scale(${bs})`;
-    // 背卡只露出下沿那一小条，不要太透，不然内容会糊在一起
-    back.style.opacity = String(Math.min(1, 0.28 + ad / 80));
-  }
+    // 任务卡：从 +12 归位到 0
+    const tOp = taskOn ? (0.55 + 0.45 * e) : 0;
+    taskIsland.style.transition = tr;
+    taskIsland.style.transform =
+      `translateX(-50%) translateY(${(12 * (1 - e)).toFixed(2)}px) scale(${(0.92 + 0.08 * e).toFixed(3)})`;
+    taskIsland.style.opacity = String(tOp);
+    taskIsland.style.zIndex = '69';
+    taskIsland.style.pointerEvents = (taskOn && tOp > .8) ? 'auto' : 'none';
 
-  function tiSettle(anim) {
-    const musicOn = island.classList.contains('on');
-    if (!musicOn) islFront = 'tasks';
-    const { front, back } = tiPair();
-    front.style.pointerEvents = 'auto';
-    back.style.pointerEvents = 'auto';
-    tiApplyStack(0, anim !== false);
-    taskIsland.classList.toggle('front', islFront === 'tasks');
+    taskIsland.classList.toggle('front', t > .5);
+    island.classList.toggle('front', t <= .5);
   }
 
   function tiSetConnected(on) {
     taskIsland.classList.toggle('on', !!on);
-    if (on) { tiSettle(false); refreshTasks(); }
+    if (on) { tiPaint(true); refreshTasks(); }
   }
 
-  function tiSwitch() {
-    const { front, back } = tiPair();
-    const dir = tiDrag && tiDrag.dy < 0 ? -1 : 1;
-    const tr = 'transform .4s cubic-bezier(.3,.9,.35,1), opacity .34s ease';
-    front.style.transition = tr;
-    back.style.transition = tr;
-    front.style.transform = `translateX(-50%) translateY(${dir * 92}px) scale(.9)`;
-    front.style.opacity = '0';
-    back.style.transform = 'translateX(-50%) translateY(0) scale(1)';
-    back.style.opacity = '1';
-    setTimeout(() => {
-      islFront = islFront === 'music' ? 'tasks' : 'music';
-      // 切换后把新的背卡摆回去（不带动画，避免闪一下）
-      tiSettle(false);
-      setTimeout(() => tiSettle(true), 20);
-    }, 380);
+  // ---- 拖动 ----
+  function tiOnMove(e) {
+    if (!tiDrag || e.pointerId !== tiDrag.id) return;
+    tiDrag.dy = e.clientY - tiDrag.y0;
+    // 上滑 = 下一张（背卡从下面上来），下滑 = 上一张
+    stackPos = tiClamp(tiDrag.base - tiDrag.dy / TI_DIST, 0, 1);
+    tiPaint(false);
   }
 
-  // ---- 拖动切换 ----
+  function tiOnUp(e) {
+    if (!tiDrag || e.pointerId !== tiDrag.id) return;
+    window.removeEventListener('pointermove', tiOnMove, true);
+    window.removeEventListener('pointerup', tiOnUp, true);
+    window.removeEventListener('pointercancel', tiOnUp, true);
+
+    const dy = tiDrag.dy;
+    const base = tiDrag.base;
+    const dt = Math.max(1, performance.now() - tiDrag.t0);
+    tiDrag = null;
+
+    let target = base;
+    if (Math.abs(dy) > TI_SLOP) tiSwallowClick = performance.now() + 360;
+    if (Math.abs(dy) > TI_SWITCH || Math.abs(dy) / dt > 0.22) {
+      target = dy < 0 ? 1 : 0;
+      tiSwallowClick = performance.now() + 460;
+    }
+    stackPos = target;
+    tiPaint(true);              // 从当前位置弹到目标，全程连续，不会闪
+  }
+
   [island, taskIsland].forEach((el) => {
     el.addEventListener('pointerdown', (e) => {
-      // 注意：不能再因为「按在按钮上」就 return——一级菜单整条卡几乎全是按钮，
-      // 那样等于整条卡都滑不动。改成照样记录，位移够大就接管成滑动，并吞掉随后的 click。
       if (el === island && island.classList.contains('exp')) return;
       if (el === taskIsland && tiLevel === 2 && e.target.closest('.ti-grid')) return;
-      tiDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId, dy: 0, t0: performance.now() };
-      try { el.setPointerCapture(e.pointerId); } catch (_) {}
-      const { front, back } = tiPair();
-      front.style.transition = 'none';
-      back.style.transition = 'none';
+      tiDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId, base: stackPos, dy: 0, t0: performance.now() };
+      // 不用 setPointerCapture：它会把 click 重定向到卡片本身，
+      // 卡片里按钮（WIN、图标）的 click 就收不到了
+      window.addEventListener('pointermove', tiOnMove, true);
+      window.addEventListener('pointerup', tiOnUp, true);
+      window.addEventListener('pointercancel', tiOnUp, true);
+      tiPaint(false);
     }, { passive: true });
-
-    el.addEventListener('pointermove', (e) => {
-      if (!tiDrag || e.pointerId !== tiDrag.id) return;
-      tiDrag.dy = e.clientY - tiDrag.y0;
-      tiApplyStack(tiDrag.dy, false);
-    }, { passive: true });
-
-    const end = (e) => {
-      if (!tiDrag || e.pointerId !== tiDrag.id) return;
-      const dy = tiDrag.dy;
-      const dt = Math.max(1, performance.now() - tiDrag.t0);
-      const speed = Math.abs(dy) / dt;
-      tiDrag = null;
-      if (Math.abs(dy) > TI_SLOP) tiSwallowClick = performance.now() + 350;
-      if (Math.abs(dy) > TI_SWITCH_PX || speed > 0.22) {
-        tiSwallowClick = performance.now() + 420;
-        tiSwitch();
-      } else {
-        tiSettle(true);
-      }
-    };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
   });
 
-  // 拖过之后吃掉 click，别让「拖一下」变成「点一下展开播放器」
+  // 拖动后吃掉紧随其后的 click（否则会误触发「展开播放器」或点中图标）
   [island, taskIsland].forEach((el) => {
     el.addEventListener('click', (e) => {
       if (performance.now() < tiSwallowClick) {
@@ -406,59 +401,86 @@
     }, true);
   });
 
-  // ---- 任务栏渲染 ----
-  function tiIconEl(item) {
-    const b = document.createElement('button');
-    b.className = 'ti-app' + (item.active ? ' active' : '') + (item.min ? ' min' : '');
+  // ---- 任务栏渲染（节点复用，避免图标闪烁）----
+  function tiIconFor(item, cache) {
+    let b = cache.get(item.h);
+    if (!b) {
+      b = document.createElement('button');
+      b.className = 'ti-app';
+      const img = document.createElement('img');
+      img.alt = '';
+      img.draggable = false;
+      img.src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(item.exe || '')}`;
+      img.addEventListener('error', () => b.classList.add('ghost'));
+      b.appendChild(img);
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        send({ t: 'act', h: item.h });
+        setTimeout(refreshTasks, 300);
+      });
+      cache.set(item.h, b);
+    }
     b.dataset.h = item.h;
     b.title = item.title || item.exe || '';
-    const img = document.createElement('img');
-    img.src = `/icon?k=${encodeURIComponent(KEY)}&h=${encodeURIComponent(item.exe || '')}`;
-    img.alt = '';
-    img.draggable = false;
-    img.addEventListener('error', () => { b.classList.add('ghost'); });
-    b.appendChild(img);
-    b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      send({ t: 'act', h: item.h });
-      b.classList.add('on');
-      setTimeout(() => b.classList.remove('on'), 160);
-      setTimeout(refreshTasks, 280);
-    });
+    b.classList.toggle('active', !!item.active);
+    b.classList.toggle('min', !!item.min);
     return b;
   }
 
+  function tiPlace(container, list, cache) {
+    // 只在顺序/成员变化时重排，平时只更新 class（图标不重建就不闪）
+    const want = list.map((it) => it.h);
+    const have = [...container.children].map((c) => Number(c.dataset.h));
+    const same = want.length === have.length && want.every((h, i) => h === have[i]);
+    if (!same) {
+      container.innerHTML = '';
+      list.forEach((it) => container.appendChild(tiIconFor(it, cache)));
+    } else {
+      list.forEach((it) => tiIconFor(it, cache));
+    }
+  }
+
+  function tiRender() {
+    tiPlace(tiRecent, tiTasks.slice(0, 4), tiNodesL1);
+    tiPlace(tiGrid, tiTasks, tiNodesL2);
+  }
+
   async function refreshTasks() {
+    let d;
     try {
       const r = await fetch(`/tasks?k=${encodeURIComponent(KEY)}`, { cache: 'no-store' });
-      const d = await r.json();
-      tiTasks = Array.isArray(d.list) ? d.list : [];
+      d = await r.json();
     } catch (_) {
       return;
     }
-    tiPaint();
-  }
-
-  function tiPaint() {
-    tiRecent.innerHTML = '';
-    tiTasks.slice(0, 4).forEach((it) => tiRecent.appendChild(tiIconEl(it)));
-    tiGrid.innerHTML = '';
-    tiTasks.forEach((it) => tiGrid.appendChild(tiIconEl(it)));
+    const list = Array.isArray(d.list) ? d.list : [];
+    // 状态（active/min）要更新，但 DOM 不重建
+    const sig = list.map((x) => x.h).join(',');
+    tiTasks = list;
+    if (sig !== tiSig) { tiSig = sig; tiRender(); }
+    else { tiRender(); }
   }
 
   function tiSetLevel(n) {
     tiLevel = n;
     taskIsland.classList.toggle('l2', n === 2);
-    if (n === 2) { refreshTasks(); }
-    setTimeout(tiSettle, 20);
+    if (n === 2) refreshTasks();
+    // 高度变化交给 CSS transition（内联里已经带上了 height/width）
+    tiPaint(true);
   }
 
   tiMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(2); });
   tiBackBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(1); });
+  tiStartBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    send({ t: 'k', vk: 0x5B });
+    setTimeout(refreshTasks, 700);
+  });
+
   setInterval(() => {
     if (!connected) return;
-    if (tiLevel === 2 || islFront === 'tasks') refreshTasks();
-  }, 3000);
+    refreshTasks();
+  }, 2500);
 
   const lyricsEl = document.getElementById('lyrics');
   const lyricInner = document.getElementById('lyricInner');
