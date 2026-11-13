@@ -1330,52 +1330,71 @@ html.glass-light {
   .winmenu button:active { background: var(--glass-hover); }
   .winmenu button.danger { color: #ff9c9c; }
 
-
-  /* ================= 灵动岛设置面板 ================= */
+  /* ================= 灵动岛设置：卡片堆叠展开 ================= */
   .islandcfg {
     position: fixed; inset: 0; z-index: 92; display: none;
-    background: rgba(4, 7, 10, .72);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    background: rgba(4, 7, 10, .58);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   }
-  .islandcfg.on { display: flex; align-items: flex-end; justify-content: center; }
-  .cfgsheet {
-    width: min(96vw, 520px); max-height: 76vh; margin-bottom: 16px;
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 14px; border-radius: 20px;
-    background: linear-gradient(180deg, var(--glass-top), var(--glass-bot));
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--card-shadow-front);
-    animation: cfgIn .26s cubic-bezier(.32,1.25,.45,1);
-  }
-  @keyframes cfgIn { from { opacity: 0; transform: translateY(18px) scale(.98); } }
-  .cfghead { display: flex; align-items: center; justify-content: space-between; }
-  .cfghead span { font-size: 14px; font-weight: 600; color: var(--glass-text); }
-  .cfghead button {
-    height: 30px; padding: 0 14px; border-radius: 9px;
-    background: rgba(255, 255, 255, .1); border: 1px solid var(--glass-border);
-    color: var(--glass-text); font-size: 12.5px;
-  }
-  .cfglist { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
-  /* 每行做成一张「卡片」的样子，像华为卡片堆叠那样能一眼看到全部卡片 */
-  .cfglist { gap: 8px; padding: 2px; }
+  .islandcfg.on { display: block; }
+  .cfgstage { position: absolute; inset: 0; }
+
+  /* 每一行 = 一张卡 + 右侧控制；整行用 transform 定位，重排时只改 transform */
   .cfgrow {
-    display: flex; align-items: center; gap: 10px;
-    min-height: 48px; padding: 8px 12px; border-radius: 16px;
-    background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.04));
-    border: 1px solid rgba(255, 255, 255, .12);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .06);
-    transition: transform .18s var(--ease-spring), opacity .2s ease, border-color .2s ease;
+    position: absolute; left: 50%; top: 50%;
+    width: min(86vw, 560px); height: 84px;
+    margin-left: calc(min(86vw, 560px) / -2 + 52px);
+    margin-top: -42px;
+    transition: transform .52s cubic-bezier(.32, 1.18, .4, 1), opacity .3s ease;
+    will-change: transform, opacity;
   }
-  .cfgrow:active { transform: scale(.985); }
-  .cfgrow.off { opacity: .45; }
-  .cfgrow b { flex: 1 1 auto; font-size: 13px; font-weight: 500; color: var(--glass-text); }
-  .cfgrow .cfgno { font-size: 11px; color: rgba(226,236,246,.4); width: 16px; }
-  .cfgrow button {
-    width: 30px; height: 30px; border-radius: 9px;
-    background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-border);
-    color: var(--glass-text); font-size: 13px; line-height: 1;
+
+  /* 卡片本体 */
+  .cfgcard {
+    position: absolute; inset: 0 124px 0 0;
+    display: flex; flex-direction: column; justify-content: flex-start; gap: 2px;
+    padding: 13px 16px 0;
+    border-radius: 18px;
+    /* 要够实：叠起来时下层的文字不能透上来 */
+    background: linear-gradient(180deg, rgba(32, 41, 52, .985), rgba(15, 20, 27, .99));
+    border: 1px solid rgba(255, 255, 255, .14);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .07);
+    overflow: hidden;
   }
-  .cfgrow button:disabled { opacity: .25; }
-  .cfgrow .cfgtoggle { width: 44px; }
-  .cfgrow .cfgtoggle.on { background: rgba(74, 222, 128, .22); border-color: rgba(74, 222, 128, .5); color: #b7f7cd; }
-  .cfgtip { font-size: 11px; color: rgba(226, 236, 246, .42); text-align: center; padding-top: 2px; }
+  .cfgcard b { font-size: 13.5px; font-weight: 600; color: var(--glass-text); }
+  .cfgcard i {
+    font-style: normal; font-size: 11px; color: rgba(226, 236, 246, .5);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cfgrow.off .cfgcard { opacity: .38; border-style: dashed; }
+
+  /* 右侧控制 */
+  .cfgctrls {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 7px;
+  }
+  .cfgctrls button {
+    width: 34px; height: 34px; border-radius: 11px;
+    background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 14px; line-height: 1;
+    transition: background .15s ease, transform .15s var(--ease-spring), opacity .15s ease;
+  }
+  .cfgctrls button:active { background: var(--glass-hover); transform: scale(.9); }
+  .cfgctrls button:disabled { opacity: .2; }
+  .cfgctrls .cfgtoggle { width: 52px; font-size: 12px; }
+  .cfgctrls .cfgtoggle.on {
+    background: rgba(74, 222, 128, .18);
+    border-color: rgba(74, 222, 128, .45);
+    color: #b7f7cd;
+  }
+
+  .cfgdone {
+    position: absolute; right: 18px; top: calc(14px + env(safe-area-inset-top));
+    height: 34px; padding: 0 18px; border-radius: 12px;
+    background: rgba(255, 255, 255, .1); border: 1px solid var(--glass-border);
+    color: var(--glass-text); font-size: 13px;
+  }
+  .cfgtip {
+    position: absolute; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom));
+    text-align: center; font-size: 11.5px; color: rgba(226, 236, 246, .42);
+  }

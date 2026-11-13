@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>PadTrack 触控板</title>
-<link rel="stylesheet" href="app.css?v=1182">
+<link rel="stylesheet" href="app.css?v=1183">
 </head>
 <body>
 
@@ -165,15 +165,11 @@
 
 <!-- 灵动岛设置（长按非任务栏卡进入） -->
 <div id="islandCfg" class="islandcfg" aria-hidden="true">
-  <div class="cfgsheet">
-    <div class="cfghead">
-      <span>灵动岛设置</span>
-      <button id="cfgClose">完成</button>
-    </div>
-    <div class="cfglist" id="cfgList"></div>
-    <div class="cfgtip">顺序就是左右上下滑动卡片的顺序 · 长按卡片可再次打开这里</div>
-  </div>
+  <div class="cfgstage" id="cfgStage"></div>
+  <button id="cfgClose" class="cfgdone">完成</button>
+  <div class="cfgtip">长按卡片可再次打开 · 顺序就是滑动顺序</div>
 </div>
+
 <!-- 窗口管理菜单（长按任务栏图标弹出） -->
 <div id="winMenu" class="winmenu" aria-hidden="true"></div>
 <div id="taskIsland" class="island-card" data-card="tasks" aria-label="任务栏">
@@ -303,6 +299,6 @@
   </div>
 </div>
 
-<script src="app.js?v=1182"></script>
+<script src="app.js?v=1183"></script>
 </body>
 </html>

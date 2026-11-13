@@ -999,7 +999,7 @@
   const CFG_KEY = 'padtrack.island.prefs';
   const CFG_NAMES = { music: '音乐播放器', tasks: '任务栏', sys: '系统状态', clip: '剪贴板', macro: '快捷按键' };
   const cfgPanel = document.getElementById('islandCfg');
-  const cfgListEl = document.getElementById('cfgList');
+  const cfgStage = document.getElementById('cfgStage');
   const cfgDoneBtn = document.getElementById('cfgClose');
 
   let cfgPrefs = { order: [], hidden: [] };
@@ -1040,57 +1040,125 @@
     islandPaint(true);
   }
 
-  function cfgRender() {
-    if (!cfgListEl) return;
-    cfgListEl.innerHTML = '';
-    const list = cfgOrdered();
-    list.forEach((card, i) => {
-      const hid = cfgPrefs.hidden.includes(card.id);
+  // 舞台里每张卡一个 .cfgrow（卡本体 + 右侧控制）
+  const cfgRows = new Map();      // id → row 元素
+  let cfgBuilt = false;
+
+  function cfgSubtitle(id) {
+    if (id === 'music') {
+      const t = document.getElementById('musicTitle');
+      return (t && t.textContent && t.textContent !== '—') ? t.textContent : '当前没有播放';
+    }
+    if (id === 'tasks') return '切窗口 · 贴边 · 启动程序';
+    if (id === 'sys') {
+      const c = document.getElementById('sysCpu');
+      return c ? ('CPU ' + c.textContent + ' · 内存 ' + document.getElementById('sysMem').textContent) : 'CPU / GPU / 温度';
+    }
+    if (id === 'clip') return '电脑剪贴板 · 点一下复制到平板';
+    if (id === 'macro') return '复制 粘贴 撤销 保存  Tab 回车 Esc';
+    return '';
+  }
+
+  function cfgBuild() {
+    if (cfgBuilt || !cfgStage) return;
+    cfgBuilt = true;
+    ISLAND_CARDS.forEach((card) => {
       const row = document.createElement('div');
-      row.className = 'cfgrow' + (hid ? ' off' : '');
+      row.className = 'cfgrow';
       row.dataset.card = card.id;
 
-      const no = document.createElement('span');
-      no.className = 'cfgno';
-      no.textContent = String(i + 1);
-      row.appendChild(no);
-
+      const cardEl = document.createElement('div');
+      cardEl.className = 'cfgcard';
       const name = document.createElement('b');
       name.textContent = CFG_NAMES[card.id] || card.id;
-      row.appendChild(name);
+      const sub = document.createElement('i');
+      sub.className = 'cfgsub';
+      cardEl.appendChild(name);
+      cardEl.appendChild(sub);
+      row.appendChild(cardEl);
+
+      const ctrls = document.createElement('div');
+      ctrls.className = 'cfgctrls';
 
       const up = document.createElement('button');
       up.textContent = '↑';
-      up.disabled = i === 0;
-      up.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(i, -1); });
-      row.appendChild(up);
-
+      up.dataset.act = 'up';
       const down = document.createElement('button');
       down.textContent = '↓';
-      down.disabled = i === list.length - 1;
-      down.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(i, 1); });
-      row.appendChild(down);
-
+      down.dataset.act = 'down';
       const tg = document.createElement('button');
-      tg.className = 'cfgtoggle' + (hid ? '' : ' on');
-      tg.textContent = hid ? '隐藏' : '显示';
-      tg.addEventListener('click', (e) => { e.stopPropagation(); cfgToggle(card.id); });
-      row.appendChild(tg);
+      tg.className = 'cfgtoggle';
+      tg.dataset.act = 'toggle';
 
-      cfgListEl.appendChild(row);
+      ctrls.appendChild(up);
+      ctrls.appendChild(down);
+      ctrls.appendChild(tg);
+      row.appendChild(ctrls);
+
+      up.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, -1); });
+      down.addEventListener('click', (e) => { e.stopPropagation(); cfgMove(card.id, 1); });
+      tg.addEventListener('click', (e) => { e.stopPropagation(); cfgToggle(card.id); });
+
+      cfgStage.appendChild(row);
+      cfgRows.set(card.id, row);
     });
   }
 
-  function cfgMove(index, delta) {
+  // 只改 transform，靠 CSS transition 做动画（重排也是同一个动画）
+  function cfgLayout(animate) {
+    const list = cfgOrdered();
+    const step = 50;                     // 每张卡错开 50px（卡高 84，所以有重叠）
+    const h = 84;
+    const total = h + (list.length - 1) * step;
+
+    list.forEach((card, i) => {
+      const row = cfgRows.get(card.id);
+      if (!row) return;
+      const y = i * step - total / 2 + h / 2;
+      row.style.zIndex = String(10 + i);
+      if (animate) {
+        row.style.transitionDelay = (i * 38) + 'ms';
+        requestAnimationFrame(() => {
+          row.style.transform = `translate3d(0, ${y}px, 0)`;
+          row.style.opacity = '1';
+          setTimeout(() => { row.style.transitionDelay = '0ms'; }, 600 + i * 38);
+        });
+      } else {
+        row.style.transform = `translate3d(0, ${y}px, 0)`;
+        row.style.opacity = '1';
+      }
+    });
+
+    // 控制按钮状态 + 副标题
+    list.forEach((card, i) => {
+      const row = cfgRows.get(card.id);
+      if (!row) return;
+      const hid = cfgPrefs.hidden.includes(card.id);
+      row.classList.toggle('off', hid);
+      const up = row.querySelector('[data-act="up"]');
+      const down = row.querySelector('[data-act="down"]');
+      const tg = row.querySelector('[data-act="toggle"]');
+      if (up) up.disabled = i === 0;
+      if (down) down.disabled = i === list.length - 1;
+      if (tg) {
+        tg.textContent = hid ? '隐藏' : '显示';
+        tg.classList.toggle('on', !hid);
+      }
+      const sub = row.querySelector('.cfgsub');
+      if (sub) sub.textContent = cfgSubtitle(card.id);
+    });
+  }
+
+  function cfgMove(id, delta) {
     const ids = cfgOrdered().map((c) => c.id);
-    const to = index + delta;
-    if (to < 0 || to >= ids.length) return;
-    const [x] = ids.splice(index, 1);
-    ids.splice(to, 0, x);
+    const at = ids.indexOf(id);
+    const to = at + delta;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(at, 1)[0]);
     cfgPrefs.order = ids;
     cfgSave();
     cfgApply();
-    cfgRender();
+    cfgLayout(true);          // 只改 transform，位置会自己滑过去
   }
 
   function cfgToggle(id) {
@@ -1108,26 +1176,42 @@
     cfgPrefs.hidden = [...hidden];
     cfgSave();
     cfgApply();
-    cfgRender();
+    cfgLayout(false);
   }
 
   function cfgOpen() {
     if (!cfgPanel) return;
-    cfgRender();
+    cfgBuild();
+    // 先全部叠到中间（合起来），再动画铺开
+    cfgRows.forEach((row) => {
+      row.style.transitionDelay = '0ms';
+      row.style.transform = 'translate3d(0, 0, 0) scale(.92)';
+      row.style.opacity = '0';
+    });
     cfgPanel.classList.add('on');
     cfgPanel.setAttribute('aria-hidden', 'false');
+    void cfgPanel.offsetWidth;          // 强制回流，保证有起始态
+    cfgLayout(true);
   }
 
   function cfgClosePanel() {
     if (!cfgPanel) return;
-    cfgPanel.classList.remove('on');
-    cfgPanel.setAttribute('aria-hidden', 'true');
+    // 收回中间再关闭
+    cfgRows.forEach((row) => {
+      row.style.transitionDelay = '0ms';
+      row.style.transform = 'translate3d(0, 0, 0) scale(.94)';
+      row.style.opacity = '0';
+    });
+    setTimeout(() => {
+      cfgPanel.classList.remove('on');
+      cfgPanel.setAttribute('aria-hidden', 'true');
+    }, 240);
   }
 
   if (cfgDoneBtn) cfgDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgClosePanel(); });
   if (cfgPanel) {
     cfgPanel.addEventListener('pointerdown', (e) => {
-      if (e.target === cfgPanel) cfgClosePanel();
+      if (e.target === cfgPanel || e.target === cfgStage) cfgClosePanel();
     });
   }
 
