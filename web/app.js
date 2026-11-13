@@ -285,15 +285,15 @@
   const tiGrid = document.getElementById('tiGrid');
   const tiMoreBtn = document.getElementById('tiMore');
   const tiBackBtn = document.getElementById('tiBack');
-  const tiStartBtn = document.getElementById('tiStart');
 
   const TI_STACK_DY = 16;       // 背卡露出的高度
-  const TI_SWITCH_PX = 38;      // 拖动超过这个距离就切换
+  const TI_SWITCH_PX = 18;      // 拖动超过这个距离就切换（原来 38，太难触发）
   let tiTasks = [];
   let tiLevel = 1;
   let islFront = 'music';       // 'music' | 'tasks'
   let tiDrag = null;
   let tiSwallowClick = 0;       // 刚拖过，吃掉这次 click
+  const TI_SLOP = 8;            // 超过这个位移才认定是滑动而不是点击
 
   function tiPair() {
     return islFront === 'music'
@@ -361,7 +361,8 @@
   // ---- 拖动切换 ----
   [island, taskIsland].forEach((el) => {
     el.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) return;
+      // 注意：不能再因为「按在按钮上」就 return——一级菜单整条卡几乎全是按钮，
+      // 那样等于整条卡都滑不动。改成照样记录，位移够大就接管成滑动，并吞掉随后的 click。
       if (el === island && island.classList.contains('exp')) return;
       if (el === taskIsland && tiLevel === 2 && e.target.closest('.ti-grid')) return;
       tiDrag = { y0: e.clientY, x0: e.clientX, id: e.pointerId, dy: 0, t0: performance.now() };
@@ -383,11 +384,11 @@
       const dt = Math.max(1, performance.now() - tiDrag.t0);
       const speed = Math.abs(dy) / dt;
       tiDrag = null;
-      if (Math.abs(dy) > TI_SWITCH_PX || speed > 0.45) {
-        tiSwallowClick = performance.now() + 400;
+      if (Math.abs(dy) > TI_SLOP) tiSwallowClick = performance.now() + 350;
+      if (Math.abs(dy) > TI_SWITCH_PX || speed > 0.22) {
+        tiSwallowClick = performance.now() + 420;
         tiSwitch();
       } else {
-        if (Math.abs(dy) > 4) tiSwallowClick = performance.now() + 300;
         tiSettle(true);
       }
     };
@@ -396,12 +397,14 @@
   });
 
   // 拖过之后吃掉 click，别让「拖一下」变成「点一下展开播放器」
-  island.addEventListener('click', (e) => {
-    if (performance.now() < tiSwallowClick) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-  }, true);
+  [island, taskIsland].forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if (performance.now() < tiSwallowClick) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true);
+  });
 
   // ---- 任务栏渲染 ----
   function tiIconEl(item) {
@@ -452,12 +455,6 @@
 
   tiMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(2); });
   tiBackBtn.addEventListener('click', (e) => { e.stopPropagation(); tiSetLevel(1); });
-  tiStartBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    send({ t: 'k', vk: 0x5B });
-    setTimeout(refreshTasks, 600);
-  });
-
   setInterval(() => {
     if (!connected) return;
     if (tiLevel === 2 || islFront === 'tasks') refreshTasks();
