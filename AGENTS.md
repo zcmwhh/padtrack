@@ -30,6 +30,10 @@
 3. **回复用中文**，把「能做到 / 做不到」讲清楚，不要静默失败
 4. 补丁脚本写成 `.probe\*.py` 文件再跑，**不要用内联 here-doc**（中文和 `$` 会被 PowerShell 吃掉）
 5. 验证用 `.probe\` 里的 CDP 探针读真实 DOM，**不要靠肉眼看截图**
+6. **不要 `taskkill /f /im msedge.exe`**。那会把用户在看的浏览器一起关掉（已经犯过，用户原话：「为什么每次你思考的时候我的浏览器进程都会自动关闭」）。
+   验证前端时用 `.probe\cdp.ps1` 的 `Start-CdpBrowser` / `Stop-CdpBrowser`：
+   独立 `--user-data-dir` + 只按 PID 杀自己那棵树。
+   注意 PowerShell 默认禁止运行 ps1，要用 `powershell -NoProfile -ExecutionPolicy Bypass`。
 
 ## 先读什么
 
